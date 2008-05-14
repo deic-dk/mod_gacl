@@ -46,6 +46,19 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
+ 
+ /*
+ *
+ * The use of GACL is based on the example from
+ * 
+ * http://jra1mw.cvs.cern.ch/cgi-bin/jra1mw.cgi/org.gridsite.core/src/gaclexample.c?view=markup
+ * 
+ * Copyright (c) 2002-7, Andrew McNab, University of Manchester
+ * All rights reserved.
+ *
+ */
+
+ 
 /*
  * mod_auth_script
  *
@@ -122,14 +135,14 @@
 #include "util_filter.h"
 #include <string.h>			/* strcmp() */
 #include <sys/stat.h>
+#include "gacl_interface/gridsite.h"
 
 /* forward declaration */
-module AP_MODULE_DECLARE_DATA auth_script_module;
+module AP_MODULE_DECLARE_DATA gacl_module;
 
 /* signature for debug message in "error_log". */
-static const char* myname = "mod_auth_script";
+static const char* myname = "mod_gacl";
 #define MY_MARK myname,0
-
 
 /*
  *
@@ -250,6 +263,22 @@ callback_copy_header(void* t, const char* key, const char* value)
   return 1;				/* not zero */
 }
 
+static int
+init_gacl()
+{
+	  /* GACL stuff */
+  GRSTgaclCred  *cred, *usercred;
+  GRSTgaclEntry *entry;
+  GRSTgaclAcl   *acl1, *acl2;
+  GRSTgaclUser  *user;
+  GRSTgaclPerm   perm0, perm1, perm2;
+  FILE          *fp;
+
+  /* must initialise GACL before using it */
+  
+  GRSTgaclInit();
+}
+
 
 /*
  * 
@@ -274,7 +303,7 @@ check_user_id(request_rec *r)
   }
 
   /* get config */
-  conf = (config_rec*)ap_get_module_config(r->per_dir_config, &auth_script_module);
+  conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   if (conf->path_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "not configured properly");
     return DECLINED;			/* not configured properly */
@@ -412,7 +441,7 @@ check_auth(request_rec *r)
   config_rec* conf;
 
   /* Thanks to "chuck.morris at ngc.com" */
-  conf = (config_rec*)ap_get_module_config(r->per_dir_config, &auth_script_module);
+  conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   if (conf->type_ == type_unset) {
     /* we are not enabled, pass on authentication */
     return DECLINED;
@@ -437,14 +466,14 @@ register_hooks(apr_pool_t* p) {
   if (null_input_filter_handle == 0) {
     null_input_filter_handle =
       ap_register_input_filter(
-	"mod_auth_script_null_input_filter",
+	"mod_gacl_null_input_filter",
 	null_input_filter, 0, AP_FTYPE_CONTENT_SET);
   }
 
   if (null_output_filter_handle == 0) {
     null_output_filter_handle =
       ap_register_output_filter(
-	"mod_auth_script_null_output_filter",
+	"mod_gacl_null_output_filter",
 	null_output_filter, 0, AP_FTYPE_CONTENT_SET);
   }
 }
@@ -456,7 +485,7 @@ register_hooks(apr_pool_t* p) {
  *
  */
 
-module AP_MODULE_DECLARE_DATA auth_script_module = {
+module AP_MODULE_DECLARE_DATA gacl_module = {
   STANDARD20_MODULE_STUFF,
   dir_config,
   0,
