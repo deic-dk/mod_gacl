@@ -4,7 +4,6 @@
 SHELL = /bin/sh
 
 MODNAME = gacl
-SRC = mod_${MODNAME}.c
 MODFILE = mod_${MODNAME}.so
 APXS = apxs
 
@@ -12,14 +11,26 @@ SRC2 = mod_${MODNAME}.c
 MODFILE2 = mod_${MODNAME}.la
 APXS2 = apxs2
 
-PKGFILES = ${SRC} ${SRC2} RELEASE README Makefile samples
+GRIDSITE_VERSION = 1.6.0
+LIB_GACL=libgacl
+GACL_SOURCE1 = grst_http.c
+GACL_SOURCE2 = grst_xacml.c
+GACL_SOURCE3 = grst_gacl.c
+
+PKGFILES = ${SRC} ${SRC2} RELEASE README Makefile samples ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
 
 default: ${MODFILE2}
 
-all: ${MODFILE2}
+all: libgacl ${MODFILE2}
 
 ${MODFILE2}: ${SRC2}
-	${APXS2} -o $@ -c ${SRC2}
+	${APXS2} -o $@ -c ${SRC2} -L. -lgacl
+
+libgacl: ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
+	gcc -shared -Wl,-soname,${LIB_GACL}.so.${GRIDSITE_VERSION} -o ${LIB_GACL}.so.${GRIDSITE_VERSION} \
+	-I/usr/include/libxml2 -I./gacl_interface  -L/usr/lib \
+  -lxml2 ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
+	ln -sf ${LIB_GACL}.so.${GRIDSITE_VERSION} ${LIB_GACL}.so
 
 install: ${MODFILE2}
 	${APXS2} -i -a -n ${MODNAME} ${MODFILE2}
