@@ -346,10 +346,10 @@ check_user_id(request_rec *r)
    * See apache source code util_script.c ap_add_cgi_vars(). */
   apr_table_setn(subreq->subprocess_env, "AUTH_SCRIPT_URI", r->uri);
   
-  /*TODO: read the X.509 subject variable*/
-  char *env = apr_table_get(r->subprocess_env, "somevar");
+  /* TODO: read the X.509 subject variable */
+  char *client_dn = apr_table_get(r->subprocess_env, "SSL_CLIENT_S_DN");
  
-  /*TODO: check it with allowed VOs*/
+  /* TODO: check it with allowed VOs */
 
   /* run */
   if ((st = ap_run_sub_req(subreq)) != OK) {
