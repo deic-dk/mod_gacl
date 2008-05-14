@@ -1,0 +1,38 @@
+
+== mod_auth_script Apache module ==
+
+You should have dreamed to do some complex, tricky or user friendly
+authentication when using Apache web server. You can do this by some CGI or
+PHP script to send out the requested content only when some condition is met.
+However, this approach is not perfect because some features of Apache web
+server cannot be used under such mechanism. Such features include HTTP/1.1
+partial file retrieving, content negotiation and output stream compression.
+
+This simple and small Apache module will solve such problem. And, it also
+simplifies an authentication mechanism.
+
+This Apache module makes it possible authentication/authorization to be done
+by an external program. The external program can be provided as a CGI, PHP or
+any other schemes which allow dynamic content to Apache.
+
+This Apache module is written just like Apache's standard modules. It may be
+used as DSO (dynamic linked) module or even compiled-in (static linked) module.
+A simple Makefile is provided for building as DSO module. On most Unix-like
+system, you will type just like below:
+
+    % make
+    % su
+    # make install
+
+I am sorry that this version does not include any documentation and samples.
+For configuration directive, please read the big comment block in the source
+file 'mod_auth_script.c'.
+
+I hope this module helps your web application project. I will appreciate any
+comments, bug reports and suggestions. And, I will be very happy if you notify
+me where and how this module works in a real web application.
+
+
+Shigeru Kanemoto
+Accense Technology, Inc.
+sgk@ppona.com
