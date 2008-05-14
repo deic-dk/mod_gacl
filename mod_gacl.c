@@ -345,6 +345,11 @@ check_user_id(request_rec *r)
    * The REQUEST_URI env variable is original_uri(r).
    * See apache source code util_script.c ap_add_cgi_vars(). */
   apr_table_setn(subreq->subprocess_env, "AUTH_SCRIPT_URI", r->uri);
+  
+  /*TODO: read the X.509 subject variable*/
+  char *env = apr_table_get(r->subprocess_env, "somevar");
+ 
+  /*TODO: check it with allowed VOs*/
 
   /* run */
   if ((st = ap_run_sub_req(subreq)) != OK) {
@@ -442,6 +447,15 @@ check_auth(request_rec *r)
 
   /* Thanks to "chuck.morris at ngc.com" */
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
+  
+   /*TODO: read the path variable*/
+  char *env = apr_table_get(r->subprocess_env, "somevar");
+  /*TODO: read the X.509 subject variable*/
+  char *env = apr_table_get(r->subprocess_env, "somevar");
+ 
+  /*TODO: check it with gridsite*/
+  
+  
   if (conf->type_ == type_unset) {
     /* we are not enabled, pass on authentication */
     return DECLINED;
