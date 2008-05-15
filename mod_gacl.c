@@ -46,6 +46,54 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
+
+  
+/*
+ * mod_gacl
+ *
+ * This module does authentication/authorization via GACL. In order to support
+ * virtual organizations, an external synchronization program (see below) can be
+ * provided as a CGI or PHP script or by any other scheme which allows dynamic
+ * content to be passed to Apache. The program CAN print a debug header, and
+ * MUST NOT print any content body. The debug header is:
+ *
+ *   auth-script-debug
+ *       Just print a debug message in the apache error_log (optional)
+ *       Any number of debug message can be printed by repeating this
+ *       header line. However, mod_cgi or other modules may merge them
+ *       or ignore them except the last header line.
+ *
+ * The external program will receive following env variable:
+ *
+ *   AUTH_SCRIPT_URI    The URI of the script.
+ *                      This is not same as REQUEST_URI, which is the
+ *                      originally requested URI by the browser.
+ *
+ * This module provides following configuration directives:
+ *
+ *   AuthScriptFile  "OS path to the program"
+ *       Specifies the program that synchronizes dn-lists (virtual organizations).
+ *       This path should be an absolute path or relative to the ServerRoot.
+ *
+ *   AuthScriptURI   "virtual path"
+ *       Specifies the program that synchronizes dn-lists (virtual organizations).
+ *       The script should be inside the web content tree.
+ *
+ *
+ * Configuration should be as follows: AuthType should be "Basic".
+ * AuthName should be provided to prompt a browser dialog. Please note that
+ * the "require" directive is required, but the actual content of the
+ * directive is meaningless in this version of the implementation.
+ * 
+ *   AuthType        Basic
+ *   AuthName        "authentication realm"
+ *   AuthScriptFile  "OS path to the program"
+ *   Require         valid-user
+ *
+ *
+ * This software is an extension of a program written by Shigeru Kanemoto <sgk@ppona.com>.
+ *
+ */
  
  /*
  *
@@ -55,72 +103,29 @@
  * 
  * Copyright (c) 2002-7, Andrew McNab, University of Manchester
  * All rights reserved.
- *
- */
-
- 
-/*
- * mod_auth_script
- *
- * This module makes it possible authentication/authorization to be done
- * by an external program. The external program can be provided as a CGI,
- * PHP or any other schemes which allow dynamic content to Apache. The program
- * SHOULD print some headers, and MUST NOT print any content body. Recognized
- * headers are as follows.
- *
- *   auth-script
- *       Authentication/authorization result (required)
- *           allow       access allowed
- *           deny        access denied
- *           prompt      access denied and cause browser to prompt the
- *                       browser built-in userid/password dialog
- *
- *   auth-script-user
- *       Set the "REMOTE_USER" CGI variable (optional, at most 1)
- *       The value of this header will be a value of "REMOTE_USER".
- *
- *   auth-script-custom-response
- *       Specify an error document for access denial (optional, at most 1)
- *           /...        internal URI
- *           http://...  external URL
- *           text...     simple text message to display
- *           "text...    simple text message to display
- *
- *   auth-script-debug
- *       Just print a debug message in the apache error_log (optional)
- *       Any number of debug message can be printed by repeating this
- *       header line. However, mod_cgi or other modules may merge them
- *       or ignore them except the last header line.
- *
- * The external program will receive following env variable.
- *
- *   AUTH_SCRIPT_URI    The authorization requesetd URI.
- *                      This is not same as REQUEST_URI, which is the
- *                      originally requested URI by the browser.
- *
- * This module provides following configuration directives:
- *
- *   AuthScriptFile  "OS path to the program"
- *       Specify the program to provide authentication/authorization.
- *       This path should be absolute path or relative to the ServerRoot.
- *
- *   AuthScriptURI   "virtual path"
- *       Specify the program to provide authentication/authorization.
- *       The script should be inside the web content tree.
- *
- *
- * Configuration should be like as follows. AuthType should be "Basic".
- * AuthName should be provided to prompt a browser dialog. Please note that
- * the "require" directive is required, but the actual content of the
- * directive is meaningless in this version of implementation.
  * 
- *   AuthType        Basic
- *   AuthName        "authentication realm"
- *   AuthScriptFile  "OS path to the program"
- *   Require         valid-user
- *
- *
- * This software was written by Shigeru Kanemoto <sgk@ppona.com>.
+ * Only a subset of the GACL specification is implemented, and one extension is made:
+ * 
+ * - only .gacl files are checked
+ * - only directory permissions are checked
+ * - <person> objects are checked with gridsite
+ * - <dn-list> objects should in principle be checked by gridsite as well
+ * - a new tag is introduced: <dn-list-url>. This must be an HTTPS URL of a
+ *   text file, containing a list of DN's - just like (some) dn-list's.
+ *   The difference to <dn-list> is that a <dn-list-url> causes mod_gacl to call
+ *   the external application, given as 'auth-script' in the Apache config file.
+ *   auth-script, in turn, must create a list of <person> objects and associated
+ *   <allow> and/or <deny> blocks and store them in a gacl file .gacl_vo. A sample
+ *   script is provided
+ * - the 'auth-script' is only called if if the file .gacl_vo does not exist
+ *   or has not been modified for a configurable number of seconds. The timeout
+ *   is specified by 'vo-timeout-seconds' in the Apache config file. If
+ *   'vo-timeout-seconds' is not specified, a default of 600 is used. If no
+ *   'auth-script' is specified and a <dn-list-url> tag is found, all permissions
+ *   are denied.
+ * - .gacl_vo files are checked just like .gacl files
+ * - unmodified source files of gridsite are used to build libgacl. The version of
+ *   gridsite used is reflected by the version number of libgacl
  *
  */
 
@@ -137,12 +142,20 @@
 #include <sys/stat.h>
 #include "gacl_interface/gridsite.h"
 
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 /* forward declaration */
 module AP_MODULE_DECLARE_DATA gacl_module;
 
 /* signature for debug message in "error_log". */
 static const char* myname = "mod_gacl";
 #define MY_MARK myname,0
+
+/* GACL file names */
+static const char* gacl_file = ".gacl";
+static const char* gacl_vo_file = ".gacl_vo";
 
 /*
  *
@@ -282,7 +295,7 @@ init_gacl()
 
 /*
  * 
- * Check the user id
+ * Check if module enabled and sync with dn-list-url
  *
  */
 
@@ -293,6 +306,7 @@ check_user_id(request_rec *r)
   request_rec* subreq;
   const char* s;
   int st;
+  int dnlist = 0;
 
   /* check if there is a request loop. */
   for (subreq = r->main; subreq != 0; subreq = subreq->main) {
@@ -304,14 +318,15 @@ check_user_id(request_rec *r)
 
   /* get config */
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
-  if (conf->path_ == 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "not configured properly");
-    return DECLINED;			/* not configured properly */
-  }
-
+  
   /* check if not configured to use this module; thanks to mrueegg@sf. */
   if (conf->type_ == type_unset)
     return DECLINED;			/* not configured */
+
+  if (conf->path_ == 0) {
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "not configured properly");
+    dnlist = 1;			/* not configured properly */
+  }
 
   /*
    *
@@ -346,12 +361,7 @@ check_user_id(request_rec *r)
    * See apache source code util_script.c ap_add_cgi_vars(). */
   apr_table_setn(subreq->subprocess_env, "AUTH_SCRIPT_URI", r->uri);
   
-  /* TODO: read the X.509 subject variable */
-  char *client_dn = apr_table_get(r->subprocess_env, "SSL_CLIENT_S_DN");
- 
-  /* TODO: check it with allowed VOs */
-
-  /* run */
+  /* run the vo sync script */
   if ((st = ap_run_sub_req(subreq)) != OK) {
     ap_destroy_sub_req(subreq);
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "error on script execution");
@@ -361,76 +371,14 @@ check_user_id(request_rec *r)
   /*
    * read the output headers
    */
-  /* copy set-cookie headers to r->headers_out */
-  apr_table_do(callback_copy_header, (void*)r->headers_out,
-    subreq->headers_out, "set-cookie", 0);
-  apr_table_do(callback_copy_header, (void*)r->headers_out,
-    subreq->err_headers_out, "set-cookie", 0);
 
   /* auth-script-debug */
   apr_table_do(callback_print_debug, (void*)r,
     subreq->headers_out, "auth-script-debug", 0);
   apr_table_do(callback_print_debug, (void*)r,
     subreq->err_headers_out, "auth-script-debug", 0);
-
-  /* auth-script-custom-response */
-  s = apr_table_get(subreq->headers_out, "auth-script-custom-response");
-  if (s == 0)
-    s = apr_table_get(subreq->err_headers_out, "auth-script-custom-response");
-  if (s != 0) {
-    char* ss;
-    ss = apr_pstrdup(r->pool, s);
-    ap_custom_response(r, HTTP_UNAUTHORIZED, ss);
-    ap_custom_response(r, HTTP_PROXY_AUTHENTICATION_REQUIRED, ss);
-  }
-
-  /* auth-script-user */
-  s = apr_table_get(subreq->headers_out, "auth-script-user");
-  if (s == 0)
-    s = apr_table_get(subreq->err_headers_out, "auth-script-user");
-  if (s != 0)
-    r->user = apr_pstrdup(r->connection->pool, s);
-
-  /*
-   * auth-script
-   */
-  s = apr_table_get(subreq->headers_out, "auth-script");
-  if (s == 0)
-    s = apr_table_get(subreq->err_headers_out, "auth-script");
-  ap_destroy_sub_req(subreq);
-  if (s == 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "no result from auth script");
-    return DECLINED;		/* script do not provide the header */
-  }
-
-  /* authentication is ok if "auth-script:allow". */
-  if (strcasecmp(s, "allow") == 0) {
-    if (r->user == 0) {
-      /*
-       * This is null because no "auth-script-user" header given.
-       * Retrieve userid from header and set it to r->user
-       * This is done by calling following API. The returned value
-       * and the result of variable 's' is useless.
-       */
-      (void)ap_get_basic_auth_pw(r, &s);
-    }
-    return OK;
-  }
-
-  /* just return deny if "auth-script:deny". */
-  if (strcasecmp(s, "deny") == 0)
-    return HTTP_UNAUTHORIZED;
-
-  /* prompt the authentication dialog if "auth-script:prompt". */
-  if (strcasecmp(s, "prompt") == 0) {
-    ap_note_basic_auth_failure(r);
-    return HTTP_UNAUTHORIZED;
-  }
-
-  /* other response is not allowed. */
-  ap_log_rerror(MY_MARK, APLOG_ERR, 0, r,
-    "unrecognized response '%s' from auth script", s);
-  return DECLINED;
+  
+  return OK;
 }
 
 
@@ -444,25 +392,69 @@ static int
 check_auth(request_rec *r)
 {
   config_rec* conf;
+  char* client_dn;
+  int  file_descriptor;
+  int oflag1 = O_RDONLY;
+  mode_t mode = S_IRUSR | S_IWUSR | S_IXUSR;
+  unsigned int open_ccsid = 37;
+  GRSTgaclAcl   *acl1, *acl2;
+  GRSTgaclPerm   perm0, perm1, perm2;
 
   /* Thanks to "chuck.morris at ngc.com" */
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   
-   /*TODO: read the path variable*/
-  char *env = apr_table_get(r->subprocess_env, "somevar");
-  /*TODO: read the X.509 subject variable*/
-  char *env = apr_table_get(r->subprocess_env, "somevar");
- 
-  /*TODO: check it with gridsite*/
-  
-  
-  if (conf->type_ == type_unset) {
-    /* we are not enabled, pass on authentication */
+  /* we are not enabled, pass on authentication */
+  if (conf->type_ == type_unset)
     return DECLINED;
-  } else {
-    /* don't do anything with Require if we run */
-    return OK;
+  
+  /* Read the X.509 subject variable */
+  client_dn = apr_table_get(r->subprocess_env, "SSL_CLIENT_S_DN");
+    
+  /* chdir to the dir containing the requested file */
+  if ((file_descriptor = open(r->filename,oflag1,mode,open_ccsid)) < 0)
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "open() error for '%s'",r->filename);
+  else { 
+    if (fchdir(file_descriptor) != 0)
+      ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "fchdir() to parent of '%s' failed",r->filename);
+    close(file_descriptor);
   }
+  
+  init_gacl();
+  
+  /* load the ACLs off the disk */
+  acl1 = GRSTgaclAclLoadFile(gacl_file);
+  if (open(gacl_vo_file,oflag1,mode,open_ccsid) == 0)
+    acl2 = GRSTgaclAclLoadFile(gacl_vo_file);
+    
+  /* find the permissions of the user in this directory */
+  if (acl1 != NULL)
+    perm1 = GRSTgaclAclTestUser(acl1, client_dn);
+
+  if (acl2 != NULL)
+    perm2 = GRSTgaclAclTestUser(acl2, client_dn);
+
+
+  /*
+   * now check if the action is permitted
+   */
+
+  if (r->method_number == M_GET)
+    perm0 = GRST_PERM_READ;
+
+  if (r->method_number == M_PUT || r->method_number == M_MKCOL ||
+      r->method_number == M_COPY || r->method_number == M_MOVE)
+    perm0 = GRST_PERM_WRITE;
+
+  if (r->method_number == M_PROPFIND)
+    perm0 = GRST_PERM_LIST;
+
+  if(((perm1) & perm0 ) != 0){
+    if(((perm2) & perm0 ) != 0)
+      return OK;
+  }
+
+  return HTTP_UNAUTHORIZED;
+    
 }
 
 

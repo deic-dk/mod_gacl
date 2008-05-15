@@ -19,24 +19,26 @@ GACL_SOURCE3 = grst_gacl.c
 
 PKGFILES = ${SRC} ${SRC2} RELEASE README Makefile samples ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
 
-default: ${MODFILE2}
+default: all
 
-all: libgacl ${MODFILE2}
+all: libgacl link module
 
-${MODFILE2}: ${SRC2}
-	${APXS2} -o $@ -c ${SRC2} -L. -lgacl
+module: ${SRC2}
+	${APXS2} -o ${MODFILE} -c ${SRC2} -L. -lgacl
+
+link:
+	ln -sf ${LIB_GACL}.so.${GRIDSITE_VERSION} ${LIB_GACL}.so
 
 libgacl: ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
 	gcc -shared -Wl,-soname,${LIB_GACL}.so.${GRIDSITE_VERSION} -o ${LIB_GACL}.so.${GRIDSITE_VERSION} \
 	-I/usr/include/libxml2 -I./gacl_interface  -L/usr/lib \
   -lxml2 ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
-	ln -sf ${LIB_GACL}.so.${GRIDSITE_VERSION} ${LIB_GACL}.so
 
-install: ${MODFILE2}
+install: libgacl link module
 	${APXS2} -i -a -n ${MODNAME} ${MODFILE2}
 
 clean:
-	rm -rf *.o *.so *.loT *.la *.lo *.slo a.out core core.* pkg .libs
+	rm -rf *.o *.so *.so.* *.loT *.la *.lo *.slo a.out core core.* pkg .libs
 
 pkg: ${PKGFILES}
 	d=${MODNAME}-`cat RELEASE`;			\
