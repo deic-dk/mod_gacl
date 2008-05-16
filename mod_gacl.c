@@ -157,6 +157,15 @@ static const char* myname = "mod_gacl";
 static const char* gacl_file = ".gacl";
 static const char* gacl_vo_file = ".gacl_vo";
 
+/* Apache environment variable */
+static const char* SSL_CLIENT_S_DN = "SSL_CLIENT_S_DN";
+
+/* This is used for logging by mod_gridsite_log_func */
+static server_rec* this_server = NULL;
+
+/* Default permission when no .gacl file present in directory */
+static int DEFAULT_PERM = GRST_PERM_READ;
+
 /*
  *
  * Config
@@ -166,6 +175,7 @@ static const char* gacl_vo_file = ".gacl_vo";
 typedef struct {
   enum { type_unset, type_file, type_uri } type_;
   char* path_;
+  char* perm_;
 } config_rec;
 
 static void*
@@ -174,6 +184,7 @@ dir_config(apr_pool_t* p, char* d)
   config_rec* conf = (config_rec*)apr_pcalloc(p, sizeof(config_rec));
   conf->type_ = type_unset;
   conf->path_ = 0;			/* null pointer */
+  conf->perm_ = 0;			/* null pointer */
   return conf;
 }
 
@@ -201,6 +212,18 @@ config_uri(cmd_parms* cmd, void* mconfig, const char* arg)
   return 0;
 }
 
+static const char*
+config_perm(cmd_parms* cmd, void* mconfig, const char* arg)
+{
+  if (((config_rec*)mconfig)->perm_)
+    return "Default permission already set.";
+
+  ((config_rec*)mconfig)->perm_ = ap_server_root_relative(cmd->pool, arg);
+  return 0;
+}
+
+// TODO: VO_TIMEOUT_SECONDS
+
 static const command_rec command_table[] = {
   AP_INIT_TAKE1(
     "AuthScriptFile", config_file, 0, OR_AUTHCFG,
@@ -208,6 +231,9 @@ static const command_rec command_table[] = {
   AP_INIT_TAKE1(
     "AuthScriptURI", config_uri, 0, OR_AUTHCFG,
     "Set virtual path to a CGI or PHP program to provide authentication/authorization function."),
+  AP_INIT_TAKE1(
+    "DefaultPermission", config_perm, 0, OR_AUTHCFG,
+    "Default permission for directories with no .gacl file. Must be one of none, read, exec, list, write, admin."),
   { 0 }
 };
 
@@ -276,26 +302,52 @@ callback_copy_header(void* t, const char* key, const char* value)
   return 1;				/* not zero */
 }
 
-static int
-init_gacl()
+ /* This is for debugging */
+int iterate_func(void *req, const char *key, const char *value)
 {
-	  /* GACL stuff */
-  GRSTgaclCred  *cred, *usercred;
-  GRSTgaclEntry *entry;
-  GRSTgaclAcl   *acl1, *acl2;
-  GRSTgaclUser  *user;
-  GRSTgaclPerm   perm0, perm1, perm2;
-  FILE          *fp;
+    int stat;
+    char *line;
+    request_rec *r = (request_rec *)req;
+    if (key == NULL || value == NULL || value[0] == '\0')
+        return 1;
+    
+    line = apr_psprintf(r->pool, "%s => %s\n", key, value);
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, line);
 
-  /* must initialise GACL before using it */
-  
-  GRSTgaclInit();
+    return 1;
 }
 
+static int dump_request(request_rec *r)
+{
+    //apr_table_do(iterate_func, r, r->headers_in, NULL);
+    apr_table_do(iterate_func, r, r->subprocess_env, NULL);
+    return OK;
+}
+
+static int get_perm(char* perm){
+		if(strcmp(perm, "none") == 0){
+			return GRST_PERM_NONE;
+		}
+		else if(strcmp(perm, "read") == 0){
+			return GRST_PERM_READ;
+		}
+		else if(strcmp(perm, "exec") == 0){
+			return GRST_PERM_EXEC;
+		}
+		else if(strcmp(perm, "list") == 0){
+			return GRST_PERM_LIST;
+		}
+		else if(strcmp(perm, "write") == 0){
+			return GRST_PERM_WRITE;
+		}
+		else if(strcmp(perm, "admin") == 0){
+			return GRST_PERM_ADMIN;
+		}
+}
 
 /*
  * 
- * Check if module enabled and sync with dn-list-url
+ * Set constants from config file, check if module enabled and sync with dn-list-url
  *
  */
 
@@ -306,8 +358,11 @@ check_user_id(request_rec *r)
   request_rec* subreq;
   const char* s;
   int st;
-  int dnlist = 0;
+  const char* client_dn;
 
+  if(this_server == NULL)
+    this_server = r->server;
+    
   /* check if there is a request loop. */
   for (subreq = r->main; subreq != 0; subreq = subreq->main) {
     if (strcmp(subreq->uri, r->uri) == 0) {
@@ -323,9 +378,19 @@ check_user_id(request_rec *r)
   if (conf->type_ == type_unset)
     return DECLINED;			/* not configured */
 
+  if (conf->perm_ == 0) {
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "default permission not configured properly");
+    /* default permission not configured properly; leaving DEFAULT_PERM as it is */
+  }
+  else{
+  	DEFAULT_PERM = get_perm(conf->perm_);
+  	ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "default permission: %s", DEFAULT_PERM);
+  }
+
+
   if (conf->path_ == 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "not configured properly");
-    dnlist = 1;			/* not configured properly */
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO sync script not configured properly");
+    return OK;			/* VO sync script not configured properly; not running script, returning OK anyway */
   }
 
   /*
@@ -333,11 +398,12 @@ check_user_id(request_rec *r)
    * run the script as a sub request
    *
    */
-  /* create the sub request */
+  /* create a sub request */
   subreq = (conf->type_ == type_file ?
     ap_sub_req_lookup_file(conf->path_, r, 0) :
     ap_sub_req_lookup_uri(conf->path_, r, 0));
-
+  //dump_request(subreq);
+ 
   /* make a duplicate copy of the table to avoid overwrite. */
   subreq->headers_in = apr_table_copy(r->pool, r->headers_in);
 
@@ -381,6 +447,11 @@ check_user_id(request_rec *r)
   return OK;
 }
 
+static void mod_gridsite_log_func(char *file, int line, int level,
+                                                    char *fmt, ...)
+{
+	ap_log_error(MY_MARK, APLOG_INFO, 0, this_server, fmt);
+}
 
 /*
  *
@@ -392,51 +463,110 @@ static int
 check_auth(request_rec *r)
 {
   config_rec* conf;
-  char* client_dn;
-  int  file_descriptor;
+  const char* client_dn;
+  int  file_descriptor, gacl_file1_ok, gacl_file2_ok;
   int oflag1 = O_RDONLY;
-  mode_t mode = S_IRUSR | S_IWUSR | S_IXUSR;
   unsigned int open_ccsid = 37;
   GRSTgaclAcl   *acl1, *acl2;
   GRSTgaclPerm   perm0, perm1, perm2;
-
+  request_rec* subreq;
+  GRSTerrorLogFunc = mod_gridsite_log_func;
+  GRSTgaclCred* usercred;
+  GRSTgaclUser  *user;
+  
   /* Thanks to "chuck.morris at ngc.com" */
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   
   /* we are not enabled, pass on authentication */
   if (conf->type_ == type_unset)
     return DECLINED;
-  
+
+  /* create a sub request */
+  subreq = (conf->type_ == type_file ?
+    ap_sub_req_lookup_file(conf->path_, r, 0) :
+    ap_sub_req_lookup_uri(conf->path_, r, 0));
+
   /* Read the X.509 subject variable */
-  client_dn = apr_table_get(r->subprocess_env, "SSL_CLIENT_S_DN");
+  client_dn = apr_table_get(subreq->subprocess_env, SSL_CLIENT_S_DN);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "client DN '%s'",client_dn);
+  //dump_request(subreq);
+  if (client_dn == NULL){
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "client DN '%s'",client_dn);
+    return HTTP_UNAUTHORIZED;
+  }
     
   /* chdir to the dir containing the requested file */
-  if ((file_descriptor = open(r->filename,oflag1,mode,open_ccsid)) < 0)
+  if ((file_descriptor = open(r->filename,oflag1)) < 0){
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "open() error for '%s'",r->filename);
+  }
   else { 
     if (fchdir(file_descriptor) != 0)
       ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "fchdir() to parent of '%s' failed",r->filename);
     close(file_descriptor);
   }
   
-  init_gacl();
+  GRSTgaclInit();
   
   /* load the ACLs off the disk */
-  acl1 = GRSTgaclAclLoadFile(gacl_file);
-  if (open(gacl_vo_file,oflag1,mode,open_ccsid) == 0)
-    acl2 = GRSTgaclAclLoadFile(gacl_vo_file);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current directory: '%s'",getcwd(NULL, 0));
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "trying to load ACL1 from: '%s'",gacl_file);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "trying to load ACL2 from: '%s'",gacl_vo_file);
+  
+  gacl_file1_ok = open(gacl_file,oflag1);
+  gacl_file2_ok = open(gacl_vo_file,oflag1);
+  
+  perm1 = DEFAULT_PERM;
+  perm2 = DEFAULT_PERM;
+  /* if no gacl files were found, stick with the defaults */
+  if (gacl_file1_ok==-1 && gacl_file2_ok==-1){
+    // TODO: recurse upwards until a .gacl file is found, etc.
+  }
+  else{
+    /* load the files */
+    if (gacl_file1_ok != -1){
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL1 from: '%s'",gacl_file);
+      acl1 = GRSTgaclAclLoadFile(gacl_file);
+      close(gacl_file);
+    }
+    else{
+      acl1 = NULL;
+    }
+    if (gacl_file2_ok != -1){
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL2 from: '%s'",gacl_vo_file);
+      acl2 = GRSTgaclAclLoadFile(gacl_vo_file);
+      close(gacl_vo_file);
+    }
+    else{
+      acl2 = NULL;
+    }
+
+    /* find the permissions of the user in this directory */
+    usercred = GRSTgaclCredNew("person");
+    GRSTgaclCredAddValue(usercred, "dn", client_dn);
+    user = GRSTgaclUserNew(usercred);
     
-  /* find the permissions of the user in this directory */
-  if (acl1 != NULL)
-    perm1 = GRSTgaclAclTestUser(acl1, client_dn);
-
-  if (acl2 != NULL)
-    perm2 = GRSTgaclAclTestUser(acl2, client_dn);
-
+    if (acl1 != NULL){
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "ACL1: '%s'",acl1->firstentry->firstcred->auri);
+      perm1 = GRSTgaclAclTestUser(acl1, user);
+    }      
+    if (acl2 != NULL){
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "ACL2: '%s'",acl2->firstentry);
+      perm2 = GRSTgaclAclTestUser(acl2, user);
+    }
+  }
+  
 
   /*
    * now check if the action is permitted
    */
+   
+   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "PERM1: '%i'", perm1);
+   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "PERM2: '%i'", perm2);
+   
+  /* this means that one of the files existed but could not be read and parsed; better back off */
+  if(perm1 < 0 || perm2 < 0){
+  	return HTTP_UNAUTHORIZED;
+  }
 
   if (r->method_number == M_GET)
     perm0 = GRST_PERM_READ;
@@ -448,8 +578,10 @@ check_auth(request_rec *r)
   if (r->method_number == M_PROPFIND)
     perm0 = GRST_PERM_LIST;
 
-  if(((perm1) & perm0 ) != 0){
-    if(((perm2) & perm0 ) != 0)
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "PERM0: '%i'", perm0);
+
+  if((perm1 & perm0 ) != 0){
+    if((perm2 & perm0 ) != 0)
       return OK;
   }
 
