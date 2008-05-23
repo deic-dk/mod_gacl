@@ -431,19 +431,14 @@ check_user_id(request_rec *r)
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   
   /* check if not configured to use this module; thanks to mrueegg@sf. */
-  if (conf->type_ == type_unset)
-    return DECLINED;			/* not configured */
+  /*if (conf->type_ == type_unset)
+    return DECLINED;*/
 
   // continue only if the requested file actually exists
   if(GACL_ROOT == NULL && (fildes = open(r->filename, oflag)) < 0)
     return OK;
 
   close(fildes);
-
-	/* only check directories */
-	/*if ((r->uri)[(strlen(r->uri)-1)] != '/') {
-		return OK;
-	}*/
 
   if (conf->perm_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "default permission not configured properly");
@@ -500,7 +495,7 @@ check_user_id(request_rec *r)
 		  }
     }
   }
-  else{
+  else if(conf->type_ == type_uri){
    /* run the script as a sub request */
 		/* create a sub request */
 		subreq = (conf->type_ == type_file ?
@@ -565,7 +560,6 @@ check_auth(request_rec *r)
 {	
   config_rec* conf;
   const char* client_dn;
-  const char* pwd;
   int gacl_file1_ok, gacl_file2_ok, fildes;
   unsigned int open_ccsid = 37;
   GRSTgaclAcl   *acl1, *acl2;
@@ -575,6 +569,8 @@ check_auth(request_rec *r)
   GRSTgaclCred* usercred;
   GRSTgaclUser  *user;
   unsigned int rec = 0;
+  char* req_fil;
+  const char* pwd;
   
   // continue only if the requested file actually exists
   if(GACL_ROOT == NULL && (fildes = open(r->filename,oflag)) < 0)
@@ -582,17 +578,12 @@ check_auth(request_rec *r)
 
   close(fildes);
 
-	/* only check directories */
-	/*if ((r->uri)[(strlen(r->uri)-1)] != '/') {
-		return OK;
-	}*/
-
   /* Thanks to "chuck.morris at ngc.com" */
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   
   /* we are not enabled, pass on authentication */
-  if (conf->type_ == type_unset)
-    return DECLINED;
+  /*if (conf->type_ == type_unset)
+    return DECLINED;*/
 
   /* create a sub request */
   subreq = ap_sub_req_lookup_file("/dev/null", r, 0);
@@ -608,27 +599,32 @@ check_auth(request_rec *r)
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "unauthorized: client DN '%s'",client_dn);
     return HTTP_UNAUTHORIZED;
   }
-    
+
   /* chdir to GACL_ROOT or the dir containing the requested file */
   if(GACL_ROOT == NULL){
-    pwd = r->filename;
+    req_fil = r->filename;
   }
   else{
-    pwd = apr_pstrcat (r->pool, GACL_ROOT, r->uri, NULL);
+    req_fil = apr_pstrcat (r->pool, GACL_ROOT, r->uri, NULL);
   }
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "changing directory to '%s'",pwd);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file to check '%s'", req_fil);
+  if (((r->uri)[(strlen(r->uri)-1)]) != '/') {
+		pwd = ap_make_dirstr_parent(r->pool, req_fil);
+	}
+	else{
+		pwd = req_fil;
+	}
+	
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current directory: %s", getcwd(NULL, 0));
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "chdir() to '%s'", pwd);
   if (chdir(pwd) < 0){
-    pwd = dirname(pwd);
-    if (chdir(pwd) < 0){
-      ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "chdir() to parent of '%s' failed",r->filename);
-    }
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "chdir() to '%s' failed", pwd);
   }
   
   GRSTgaclInit();
   
   /* load the ACLs off the disk */
   pwd = getcwd(NULL, 0);
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current directory: %s",pwd);
   
   /* recurse upwards until .gacl and .gacl_vo files are found */
   gacl_file1_ok = -1;
@@ -638,19 +634,23 @@ check_auth(request_rec *r)
   
   while(rec < MAX_RECURSE && (gacl_file1_ok != 0 || gacl_file2_ok != 0)){
     
-  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current dir: %s",pwd);
+  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current dir: %s", pwd);
   	
     if (gacl_file1_ok < 0){
       gacl_file1_ok = open(gacl_file, oflag);
-      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL1 from: '%s'",gacl_file);
-      acl1 = GRSTgaclAclLoadFile(gacl_file);
-      close(gacl_file1_ok);
+      if (gacl_file1_ok >= 0){
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL1 from: '%s'", gacl_file);
+        acl1 = GRSTgaclAclLoadFile(gacl_file);
+        close(gacl_file1_ok);
+      }
     }
     if (gacl_file2_ok < 0){
       gacl_file2_ok = open(gacl_vo_file, oflag);
-      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL2 from: '%s'",gacl_vo_file);
-      acl2 = GRSTgaclAclLoadFile(gacl_vo_file);
-      close(gacl_file2_ok);
+      if (gacl_file2_ok >= 0){
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL2 from: '%s'", gacl_vo_file);
+        acl2 = GRSTgaclAclLoadFile(gacl_vo_file);
+        close(gacl_file2_ok);
+      }
     }
 
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found gacl files: %i %i", gacl_file1_ok, gacl_file2_ok);
@@ -686,16 +686,15 @@ check_auth(request_rec *r)
     user = GRSTgaclUserNew(usercred);
     
     if (acl1 != NULL){
-      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "ACL1: '%s'",acl1->firstentry->firstcred->auri);
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "First DN from ACL1: '%s'",acl1->firstentry->firstcred->auri);
       perm1 = GRSTgaclAclTestUser(acl1, user);
     }      
     if (acl2 != NULL){
-      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "ACL2: '%s'",acl2->firstentry);
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "First DN from ACL2: '%s'",acl2->firstentry->firstcred->auri);
       perm2 = GRSTgaclAclTestUser(acl2, user);
     }
     
   }
-  
 
   /*
    * now check if the action is permitted
@@ -722,8 +721,10 @@ check_auth(request_rec *r)
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "PERM0: '%i'", perm0);
 
   if((perm1 & perm0 ) != 0){
-    if((perm2 & perm0 ) != 0)
+    if((perm2 & perm0 ) != 0){
+    	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
       return OK;
+    }
   }
 
   return HTTP_UNAUTHORIZED;
