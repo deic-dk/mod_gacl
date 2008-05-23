@@ -90,10 +90,6 @@
  *       Specifies the program that synchronizes dn-lists (virtual organizations).
  *       This path should be an absolute path or relative to the ServerRoot.
  *
- *   AuthScriptURI   "virtual path"
- *       Specifies the program that synchronizes dn-lists (virtual organizations).
- *       The script should be inside the web content tree.
- *
  *
  * Configuration should be as follows: AuthType should be "Basic".
  * AuthName should be provided to prompt a browser dialog. Please note that
@@ -135,9 +131,7 @@
  * - the 'auth-script' is only called if the file .gacl_vo does not exist
  *   or has not been modified for a configurable number of seconds. The timeout
  *   is specified by 'VOTimeoutSeconds' in the Apache config file. If
- *   'VOTimeoutSeconds' is not specified, a default of 600 is used. If no
- *   'AuthScriptFile' or 'AuthScriptURI' is specified and a <dn-list-url> tag is found, all permissions
- *   are denied.
+ *   'VOTimeoutSeconds' is not specified, a default of 600 is used.
  * - .gacl_vo files are checked just like .gacl files
  * - unmodified source files of gridsite are used to build libgacl. The version of
  *   gridsite used is reflected by the version number of libgacl
@@ -153,15 +147,16 @@
 #include "apr_strings.h"
 #include "apr_buckets.h"
 #include "util_filter.h"
-#include <string.h>			/* strcmp() */
-#include <sys/stat.h>
 #include "gacl_interface/gridsite.h"
 
-#include <stdio.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <libgen.h>
-#include <stdlib.h>
+//#include <string.h>			/* strcmp() */
+//#include <stdio.h>
+//#include <unistd.h>
+//#include <fcntl.h>
+//#include <libgen.h>
+//#include <stdlib.h>
+//#include <sys/stat.h>
+//#include <time.h>
 
 /* forward declaration */
 module AP_MODULE_DECLARE_DATA gacl_module;
@@ -180,11 +175,17 @@ static const char* SSL_CLIENT_S_DN_STRING = "SSL_CLIENT_S_DN";
 /* This is used for logging by mod_gridsite_log_func */
 static server_rec* this_server = NULL;
 
-/* Default permission when no .gacl file present in directory */
+/* Default permission when no .gacl file present in directory - overridden by DefaultPermissions */
 static int DEFAULT_PERM = GRST_PERM_READ;
 
 /* Directory root to check for .gacl files */
 static char* GACL_ROOT = NULL;
+
+/* VO timout in seconds */
+static long VO_TIMEOUT_SECONDS;
+
+/* Default VO timout in seconds - overridden by VOTimeoutSeconds */
+static const long DEFAULT_VO_TIMEOUT_SECONDS = 300;
 
 /* Apache serverRoot */
 static char* DOCUMENT_ROOT = NULL;
@@ -205,20 +206,20 @@ static AP_DECLARE_DATA ap_filter_rec_t* null_output_filter_handle = 0;
  */
 
 typedef struct {
-  enum { type_unset, type_file, type_uri } type_;
   char* path_;
   char* perm_;
   char* root_;
+  long timeout_;
 } config_rec;
 
 static void*
 dir_config(apr_pool_t* p, char* d)
 {
   config_rec* conf = (config_rec*)apr_pcalloc(p, sizeof(config_rec));
-  conf->type_ = type_unset;
   conf->path_ = 0;			/* null pointer */
   conf->perm_ = 0;			/* null pointer */
   conf->root_ = 0;			/* null pointer */
+  conf->timeout_ = 0;
   return conf;
 }
 
@@ -228,21 +229,7 @@ config_file(cmd_parms* cmd, void* mconfig, const char* arg)
   if (((config_rec*)mconfig)->path_)
     return "Path to the script already set.";
 
-  ((config_rec*)mconfig)->type_ = type_file;
   ((config_rec*)mconfig)->path_ = ap_server_root_relative(cmd->pool, arg);
-  return 0;
-}
-
-static const char*
-config_uri(cmd_parms* cmd, void* mconfig, const char* arg)
-{
-  if (((config_rec*)mconfig)->path_)
-    return "Path to the script already set.";
-  if (arg[0] != '/')
-    return "URI should start with '/'.";
-
-  ((config_rec*)mconfig)->type_ = type_uri;
-  ((config_rec*)mconfig)->path_ = apr_pstrdup(cmd->pool, arg);
   return 0;
 }
 
@@ -252,7 +239,7 @@ config_perm(cmd_parms* cmd, void* mconfig, const char* arg)
   if (((config_rec*)mconfig)->perm_)
     return "Default permission already set.";
 
-  ((config_rec*)mconfig)->perm_ = arg;
+  ((config_rec*)mconfig)->perm_ = (char*) arg;
   return 0;
 }
 
@@ -262,7 +249,17 @@ config_root(cmd_parms* cmd, void* mconfig, const char* arg)
   if (((config_rec*)mconfig)->root_)
     return "GACL root already set.";
 
-  ((config_rec*)mconfig)->root_ = arg;
+  ((config_rec*)mconfig)->root_ = (char*) arg;
+  return 0;
+}
+
+static const char*
+config_timeout(cmd_parms* cmd, void* mconfig, const char* arg)
+{
+  if (((config_rec*)mconfig)->timeout_)
+    return "GACL root already set.";
+
+  ((config_rec*)mconfig)->timeout_ = atol(arg);
   return 0;
 }
 
@@ -271,17 +268,16 @@ static const command_rec command_table[] = {
     "AuthScriptFile", config_file, NULL, OR_AUTHCFG,
     "Set an OS path to a CGI or PHP program to provide authentication/authorization function. The path can be absolute or relative to the ServerRoot." ),
   AP_INIT_TAKE1(
-    "AuthScriptURI", config_uri, NULL, OR_AUTHCFG,
-    "Set virtual path to a CGI or PHP program to provide authentication/authorization function."),
-  AP_INIT_TAKE1(
     "DefaultPermission", config_perm, NULL, OR_AUTHCFG,
     "Default permission for directories with no .gacl file. Must be one of none, read, exec, list, write, admin."),
   AP_INIT_TAKE1(
     "GACLRoot", config_root, NULL, OR_AUTHCFG,
     "Directory root to check for .gacl file."),
+  AP_INIT_TAKE1(
+    "VOTimeoutSeconds", config_timeout, NULL, OR_AUTHCFG,
+    "Cache timeout for VO lists (dn-lists)."),
   { NULL }
 };
-
 
 /*
  *
@@ -397,6 +393,51 @@ static void mod_gridsite_log_func(char *file, int line, int level,
 	ap_log_error(MY_MARK, APLOG_INFO, 0, this_server, fmt);
 }
 
+char* get_path(request_rec *r, char* req_fil)
+{
+  char* pwd;
+	
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file to check '%s'", req_fil);
+  
+  if (((r->uri)[(strlen(r->uri)-1)]) != '/') {
+		pwd = ap_make_dirstr_parent(r->pool, req_fil);
+	}
+	else{
+		pwd = req_fil;
+	}
+	
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found '%s'", pwd);
+	
+	return pwd;
+}
+
+
+/*
+ * 
+ * Return ("current date" - "modification date") - timeout
+ * or -1 if file does not exist.
+ *
+ */
+long check_timeout(request_rec *r, const char* file){
+  struct stat attrib;			// create a file attribute structure 
+  time_t  mtime;        // current number of seconds since 1970
+  time_t  nowtime;        // current number of seconds since 1970
+  long diff;
+  
+  nowtime = time((time_t *)NULL);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current time: %d", nowtime);
+  if(stat(file, &attrib) < 0){
+  	return -1;
+  }
+  mtime = attrib.st_mtime;
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "modification time of %s: %d", file, mtime);
+  diff = difftime(nowtime, mtime);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "difference: %d <-> %d", diff, VO_TIMEOUT_SECONDS);
+  diff = diff - VO_TIMEOUT_SECONDS;
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "returning: %d", diff);
+  return diff;
+}
+
 /*
  * 
  * Set constants from config file, check if module enabled and sync with dn-list-url
@@ -410,14 +451,16 @@ check_user_id(request_rec *r)
   request_rec* subreq;
   const char* s, client_dn;
   char* check_file_path;
-  int st, fildes;
+  char* gacl_vo_file;
+  char* dir;
+  int st;
   int run_res = -8000;
 
   if(this_server == NULL)
     this_server = r->server;
     
   if (DOCUMENT_ROOT == NULL)
-    DOCUMENT_ROOT = ap_document_root(r);
+    DOCUMENT_ROOT = (char*) ap_document_root(r);
 
   /* check if there is a request loop. */
   for (subreq = r->main; subreq != 0; subreq = subreq->main) {
@@ -435,10 +478,8 @@ check_user_id(request_rec *r)
     return DECLINED;*/
 
   // continue only if the requested file actually exists
-  if(GACL_ROOT == NULL && (fildes = open(r->filename, oflag)) < 0)
+  if(GACL_ROOT == NULL && (access(r->filename, oflag)) < 0)
     return OK;
-
-  close(fildes);
 
   if (conf->perm_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "default permission not configured properly");
@@ -459,11 +500,38 @@ check_user_id(request_rec *r)
   	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "GACL root: %s", GACL_ROOT);
   }
   
+  if (conf->timeout_ == 0) {
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO timeout not configured properly");
+    /* default permission not configured properly; leaving GACL_ROOT as NULL -
+     * meaning GACL files are assumed to be next to the files served */
+    VO_TIMEOUT_SECONDS = DEFAULT_VO_TIMEOUT_SECONDS;
+  }
+  else{
+  	VO_TIMEOUT_SECONDS = conf->timeout_;
+  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "VO timeout: %l", VO_TIMEOUT_SECONDS);
+  }
+  
    /*
 		*
 		* run the VO sync script
 		*
-		*/
+		*/  
+  
+  if (GACL_ROOT == NULL) {
+ 	  check_file_path = r->filename;
+  }
+  else{
+    check_file_path = apr_pstrcat(r->pool, GACL_ROOT, r->uri, NULL);
+  }
+  
+  /* run only if last check was done longer ago than VO_TIMEOUT_SECONDS */
+  dir = get_path(r, check_file_path);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "dir: %s", dir);
+  gacl_vo_file = apr_pstrcat(r->pool, dir, "/.gacl_vo", NULL);
+  if( check_timeout(r, gacl_vo_file) < 0 ){
+  	return OK;
+  }
+  
   if (conf->path_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO sync script not configured properly");
     return OK;			/* VO sync script not configured properly; not running script, returning OK anyway */
@@ -472,81 +540,21 @@ check_user_id(request_rec *r)
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "will run script: %s", conf->path_);
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "for %s", r->uri);
   }
-  
-  // TODO: only run if last check was done longer ago than VO_TIMEOUT_SECONDS
-  if(conf->type_ == type_file){
-   	//char * command = malloc(strlen(conf->path_)+strlen(r->uri)+1);
-  	//sprintf(command, "%s %s", conf->path_, r->uri);
-  	if(GACL_ROOT == NULL){
-  		check_file_path = r->filename;
-  	}
-  	else{
-  		check_file_path = apr_pstrcat (r->pool, GACL_ROOT, r->uri, NULL);
-  	}
-   	char * command = apr_pstrcat (r->pool, conf->path_, " ", check_file_path, NULL);
-    /* run the script as a system command */
-    if(run_res == -8000) {
-    	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "executing %s", command);
-    	run_res = system(command);
-    	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "--> %i", run_res);
-	    if (run_res != OK) {
-		    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "error on script execution");
-		    return DECLINED;				/* script claims an error */
-		  }
-    }
-  }
-  else if(conf->type_ == type_uri){
-   /* run the script as a sub request */
-		/* create a sub request */
-		subreq = (conf->type_ == type_file ?
-		ap_sub_req_lookup_file(conf->path_, r, 0) :
-		ap_sub_req_lookup_uri(conf->path_, r, 0));
-		//dump_request(subreq);
-		
-		/* make a duplicate copy of the table to avoid overwrite. */
-		subreq->headers_in = apr_table_copy(r->pool, r->headers_in);
-		
-		/* make sure the CGI or PHP don't eat stdin */
-		apr_table_unset(subreq->headers_in, "content-type");
-		apr_table_unset(subreq->headers_in, "content-length");
-		subreq->remaining = 0;
-		
-		/* Apache2 specific. The "mod_cgi" reads and transfers all data from stdin
-		to the CGI child process even if the request method is GET. */
-		ap_add_input_filter_handle(
-		null_input_filter_handle, 0, subreq, subreq->connection);
-		
-		/* Apache2 specific. Prevent the CGI output to be mixed with
-		the requested contents. */
-		ap_add_output_filter_handle(
-		null_output_filter_handle, 0, subreq, subreq->connection);
-		
-		/* Pass this requested URI (not original URI) to the sub request.
-		* The REQUEST_URI env variable is original_uri(r).
-		* See apache source code util_script.c ap_add_cgi_vars(). */
-		apr_table_setn(subreq->subprocess_env, "AUTH_SCRIPT_URI", r->uri);
-		
-		/* run the vo sync script */
-		if ((st = ap_run_sub_req(subreq)) != OK) {
-		  ap_destroy_sub_req(subreq);
+
+  char * command = apr_pstrcat(r->pool, conf->path_, " ", check_file_path, NULL);
+  /* run the script as a system command */
+  if (run_res == -8000) {
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "executing %s", command);
+    run_res = system(command);
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "--> %i", run_res);
+	  if (run_res != OK) {
 		  ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "error on script execution");
-		  return st;				/* script claims an error */
+		  return DECLINED;				/* script claims an error */
 		}
-		
-	 /*
-		* read the output headers
-		*/
-		
-		/* auth-script-debug */
-		apr_table_do(callback_print_debug, (void*)r,
-		subreq->headers_out, "auth-script-debug", 0);
-		apr_table_do(callback_print_debug, (void*)r,
-		subreq->err_headers_out, "auth-script-debug", 0);
-		
-		ap_destroy_sub_req(subreq);
   }
 
   return OK;
+
 }
 
 /*
@@ -560,7 +568,7 @@ check_auth(request_rec *r)
 {	
   config_rec* conf;
   const char* client_dn;
-  int gacl_file1_ok, gacl_file2_ok, fildes;
+  int gacl_file1_ok, gacl_file2_ok;
   unsigned int open_ccsid = 37;
   GRSTgaclAcl   *acl1, *acl2;
   GRSTgaclPerm   perm0, perm1, perm2;
@@ -570,21 +578,15 @@ check_auth(request_rec *r)
   GRSTgaclUser  *user;
   unsigned int rec = 0;
   char* req_fil;
-  const char* pwd;
+  char* pwd;
   
   // continue only if the requested file actually exists
-  if(GACL_ROOT == NULL && (fildes = open(r->filename,oflag)) < 0)
+  if(GACL_ROOT == NULL && (access(r->filename,oflag)) < 0)
     return OK;
-
-  close(fildes);
 
   /* Thanks to "chuck.morris at ngc.com" */
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   
-  /* we are not enabled, pass on authentication */
-  /*if (conf->type_ == type_unset)
-    return DECLINED;*/
-
   /* create a sub request */
   subreq = ap_sub_req_lookup_file("/dev/null", r, 0);
   
@@ -607,13 +609,7 @@ check_auth(request_rec *r)
   else{
     req_fil = apr_pstrcat (r->pool, GACL_ROOT, r->uri, NULL);
   }
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file to check '%s'", req_fil);
-  if (((r->uri)[(strlen(r->uri)-1)]) != '/') {
-		pwd = ap_make_dirstr_parent(r->pool, req_fil);
-	}
-	else{
-		pwd = req_fil;
-	}
+	pwd = get_path(r, req_fil);
 	
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current directory: %s", getcwd(NULL, 0));
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "chdir() to '%s'", pwd);
@@ -624,7 +620,7 @@ check_auth(request_rec *r)
   GRSTgaclInit();
   
   /* load the ACLs off the disk */
-  pwd = getcwd(NULL, 0);
+  pwd = (char*) getcwd(NULL, 0);
   
   /* recurse upwards until .gacl and .gacl_vo files are found */
   gacl_file1_ok = -1;
@@ -640,7 +636,7 @@ check_auth(request_rec *r)
       gacl_file1_ok = open(gacl_file, oflag);
       if (gacl_file1_ok >= 0){
         ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL1 from: '%s'", gacl_file);
-        acl1 = GRSTgaclAclLoadFile(gacl_file);
+        acl1 = GRSTgaclAclLoadFile((char*)gacl_file);
         close(gacl_file1_ok);
       }
     }
@@ -648,7 +644,7 @@ check_auth(request_rec *r)
       gacl_file2_ok = open(gacl_vo_file, oflag);
       if (gacl_file2_ok >= 0){
         ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL2 from: '%s'", gacl_vo_file);
-        acl2 = GRSTgaclAclLoadFile(gacl_vo_file);
+        acl2 = GRSTgaclAclLoadFile((char*)gacl_vo_file);
         close(gacl_file2_ok);
       }
     }
@@ -668,7 +664,7 @@ check_auth(request_rec *r)
       break;
     }
 
-    pwd = getcwd(NULL, 0);
+    pwd = (char*) getcwd(NULL, 0);
   	  	
     ++rec;
     
@@ -682,7 +678,7 @@ check_auth(request_rec *r)
     
     /* find the permissions of the user in this directory */
     usercred = GRSTgaclCredNew("person");
-    GRSTgaclCredAddValue(usercred, "dn", client_dn);
+    GRSTgaclCredAddValue(usercred, "dn", (char*)client_dn);
     user = GRSTgaclUserNew(usercred);
     
     if (acl1 != NULL){
