@@ -70,14 +70,15 @@
  *       Number of seconds to cache dn-lists.
  *
  *   AuthScriptFile  "OS path to the program"
- *       Specifies the program that synchronizes dn-lists (virtual organizations).
+ *       Specifies the program that caches the dn-lists (virtual organizations)
+ *       given in the .gacl files.
  *       This path should be an absolute path or relative to the ServerRoot.
  *
  *
- * Configuration should be as follows: AuthType should be "Basic".
- * AuthName should be provided to prompt a browser dialog. Please note that
+ * The directives given below are mandatory. AuthType should be "Basic".
+ * AuthName can be provided to prompt a browser dialog. Please note that
  * the "require" directive is required, but the actual content of the
- * directive is meaningless in this version of the implementation.
+ * directive is meaningless.
  * 
  *   AuthType        Basic
  *   AuthName        "authentication realm"
@@ -101,16 +102,15 @@
  * 
  * - <person> objects are checked with gridsite.
  * 
- * - <dn-list> objects should in principle be checked by gridsite as well - but
- *   this has not been tested.
+ * - <dn-list><url>...</url><dn-list> objects are checked.
  * 
- * - a new tag is proposed: <dn-list-url>https://some.url/vo.txt</dn-list-url>.
- *   This must be an HTTPS URL of a text file, containing a list of DN's.
- *   The difference to <dn-list><url>https://some.url/vo.txt</url></dn-list>
- *   is that a <dn-list-url> causes mod_gacl to call the external application,
- *   given as AuthScriptFile in the Apache config file. AuthScriptFile, in turn,
- *   must create a list of <person> objects and associated <allow> and/or <deny>
- *   blocks and store them in a GACL file .gacl_vo. A sample script is provided.
+ * - Objects of this last type, say <dn-list-url>https://some.url/vo.txt</dn-list-url>
+ *   should be parsed by the script AuthScriptFile
+ *   This URL must be an HTTPS or HTTP URL of a text file, containing a list of DN's.
+ *   If given, mod_gacl calls the external application given as AuthScriptFile in the Apache
+ *   config file. AuthScriptFile, in turn, must create a list of <person> objects and associated
+ *   <allow> and/or <deny> blocks and store them in a GACL file .gacl_vo.
+ *   A sample script is provided.
  * 
  * - AuthScriptFile is only called if the file .gacl_vo does not exist or has not
  *   been modified for a configurable number of seconds. The timeout is specified
@@ -395,7 +395,7 @@ long check_timeout(request_rec *r, const char* file){
   nowtime = time((time_t *)NULL);
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current time: %d", nowtime);
   if(stat(file, &attrib) < 0){
-  	return -1;
+  	return 0;
   }
   mtime = attrib.st_mtime;
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "modification time of %s: %d", file, mtime);
@@ -489,15 +489,15 @@ check_user_id(request_rec *r)
   dir = get_path(r, check_file_path);
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "dir: %s", dir);
   gacl_vo_file = apr_pstrcat(r->pool, dir, "/.gacl_vo", NULL);
-  if( check_timeout(r, gacl_vo_file) < 0 ){
-  	return OK;
-  }
   
   if (conf->path_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO sync script not configured properly");
     return OK;			/* VO sync script not configured properly; not running script, returning OK anyway. */
   }
   else{
+    if( check_timeout(r, gacl_vo_file) < 0 ){
+  	  return OK;
+    }
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "will run script: %s", conf->path_);
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "for %s", r->uri);
   }
@@ -587,7 +587,7 @@ check_auth(request_rec *r)
   acl1 = NULL;
   acl2 = NULL;
   
-  while(rec < MAX_RECURSE && (gacl_file1_ok != 0 || gacl_file2_ok != 0)){
+  while(rec < MAX_RECURSE && (gacl_file1_ok < 0 || gacl_file2_ok < 0)){
     
   	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current dir: %s", pwd);
   	
@@ -610,7 +610,9 @@ check_auth(request_rec *r)
 
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found gacl files: %i %i", gacl_file1_ok, gacl_file2_ok);
     
-  	if(strcmp(pwd, DOCUMENT_ROOT) <= 0 || GACL_ROOT != NULL && strcmp(pwd, GACL_ROOT) <= 0 || strcmp(pwd, "/") == 0){
+  	if(gacl_file1_ok >= 0 && gacl_file2_ok >= 0 ||
+  	   strcmp(pwd, DOCUMENT_ROOT) <= 0 || GACL_ROOT != NULL && strcmp(pwd, GACL_ROOT) <= 0 ||
+  	   strcmp(pwd, "/") == 0){
   		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "recursed down to: %s", pwd);
   		break;
   	}
@@ -630,10 +632,10 @@ check_auth(request_rec *r)
   }
   
   perm1 = DEFAULT_PERM;
-  perm2 = GRST_PERM_ALL;
+  perm2 = DEFAULT_PERM;
   
   /* If no gacl files were found, caryy on and stick with the defaults. */
-  if (gacl_file1_ok != -1 || gacl_file2_ok != -1) {
+  if (gacl_file1_ok >= 0 || gacl_file2_ok >= 0) {
     
     /* Find the permissions of the user in this directory. */
     usercred = GRSTgaclCredNew("person");
@@ -674,12 +676,16 @@ check_auth(request_rec *r)
     perm0 = GRST_PERM_LIST;
 
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "PERM0: '%i'", perm0);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "(perm1 & perm0 ): '%i'", (perm1 & perm0 ));
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "(perm2 & perm0 ): '%i'", (perm2 & perm0 ));
 
-  if((perm1 & perm0 ) != 0){
-    if((perm2 & perm0 ) != 0){
-    	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
-      return OK;
-    }
+  if((acl1 != NULL) && ((perm1 & perm0 ) != 0)){
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
+    return OK;
+  }
+  if((acl2 != NULL) && ((perm2 & perm0 ) != 0)){
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
+    return OK;
   }
 
   return HTTP_UNAUTHORIZED;

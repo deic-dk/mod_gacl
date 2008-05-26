@@ -30,7 +30,8 @@
 DOCUMENT_ROOT="/var/www/html/grid/data"
 GACL_FILE=".gacl"
 GACL_VO_FILE=".gacl_vo"
-DN_LIST_URL_TAG="dn-list-url"
+DN_LIST_TAG="dn-list"
+DN_LIST_URL_TAG="url"
 
 #
 # First find the directory containing the .gacl file to check.
@@ -72,9 +73,16 @@ fi
 
 #
 # Check if the .gacl file contains elements of the form
-# <dn-list-url>https://some.url/vo.txt</dn-list-url>.
+# <dn-list><url>https://some.url/vo.txt</url></dn-list>.
 # If it does, construct list of URLs.
 #
+
+check=`grep "<$DN_LIST_TAG>" $GACL_FILE`
+if [ -z "$check" ]; then
+  echo "no $DN_LIST_URL_TAG tag found"
+  exit 0
+fi
+
 
 # Get the list of URLs
 gacl_line=`sed -n '1h;2,$H;${g;s/\n//g;p}' .gacl | sed -r 's/>\s+</></g'`
@@ -82,7 +90,7 @@ old_line=""
 url_list=$gacl_line
 while [ "$url_list" != "$old_line" ]; do
   old_line=$url_list
-  url_list=`echo "$old_line" | sed -r "s|(.*)<$DN_LIST_URL_TAG>(.*)</$DN_LIST_URL_TAG>(.*)|\2\\t\1\3|"`
+  url_list=`echo "$old_line" | sed -r "s|(.*)<$DN_LIST_TAG><$DN_LIST_URL_TAG>(.*)</$DN_LIST_URL_TAG></$DN_LIST_TAG>(.*)|\2\\t\1\3|"`
 done
 url_list=`echo "$url_list" | sed -r 's|(.*http[s]*://\S+)\t[^\t]*|\1|'`
 
@@ -101,7 +109,7 @@ old_line=""
 entries_list=`echo "$gacl_line" | sed 's|<entry>|<entry\t>|gi' | sed 's|</entry>|</entry\t>|gi'`
 while [ "$entries_list" != "$old_line" ]; do
   old_line=$entries_list
-  entries_list=`echo "$old_line" | sed -r "s|(.*)<entry\t>([^\t]*)<$DN_LIST_URL_TAG>([^\t]*)</$DN_LIST_URL_TAG>([^\t]*)</entry\t>(.*)|\3\2\4\1\5|"`
+  entries_list=`echo "$old_line" | sed -r "s|(.*)<entry\t>([^\t]*)<$DN_LIST_TAG><$DN_LIST_URL_TAG>([^\t]*)</$DN_LIST_URL_TAG></$DN_LIST_TAG>([^\t]*)</entry\t>(.*)|\3\2\4\1\5|"`
 done
 entries_list=`echo "$entries_list" | sed -r 's|(.+)<gacl>.*|\1|i'`https://
 #echo "$url_list" | tr '\t' ' '
