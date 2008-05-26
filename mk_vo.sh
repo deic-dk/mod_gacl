@@ -56,6 +56,7 @@ fi
 
 # Recurse upwards until a .gacl file is found.
 
+cd "$dir"
 while [ $PWD != DOCUMENT_ROOT -a $PWD != "/" ]; do
   if [ -e $GACL_FILE ]; then
     echo "Found $GACL_FILE file in $PWD"
