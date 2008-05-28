@@ -151,7 +151,7 @@ static const char* SSL_CLIENT_S_DN_STRING = "SSL_CLIENT_S_DN";
 /* This is used for logging by mod_gridsite_log_func */
 static server_rec* this_server = NULL;
 
-/* Default permission when no .gacl file present in directory - overridden by DefaultPermissions */
+/* Default permission when no .gacl file present in directory - overridden by DefaultPermission */
 static int DEFAULT_PERM = GRST_PERM_READ;
 
 /* Directory root to check for .gacl files */
@@ -198,7 +198,7 @@ dir_config(apr_pool_t* p, char* d)
 }
 
 static const char*
-config_file(cmd_parms* cmd, void* mconfig, const char* arg)
+config_path(cmd_parms* cmd, void* mconfig, const char* arg)
 {
   if (((config_rec*)mconfig)->path_)
     return "Path to the script already set.";
@@ -239,7 +239,7 @@ config_timeout(cmd_parms* cmd, void* mconfig, const char* arg)
 
 static const command_rec command_table[] = {
   AP_INIT_TAKE1(
-    "AuthScriptFile", config_file, NULL, OR_AUTHCFG,
+    "AuthScriptFile", config_path, NULL, OR_AUTHCFG,
     "Set an OS path to a CGI or PHP program to provide authentication/authorization function. The path can be absolute or relative to the ServerRoot." ),
   AP_INIT_TAKE1(
     "DefaultPermission", config_perm, NULL, OR_AUTHCFG,
