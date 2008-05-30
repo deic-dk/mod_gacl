@@ -52,7 +52,7 @@
  * 
  * This module does authentication/authorization via GACL. In order to support
  * virtual organizations, an external synchronization program (see below) can be
- * provided as a local script. The script wil receive the argument REQUEST_URI
+ * provided as a local script. The script wil receive the argument REQUEST_URI.
  *
  * This module provides following configuration directives:
  * 
@@ -133,6 +133,14 @@
 #include "apr_buckets.h"
 #include "util_filter.h"
 #include "gacl_interface/gridsite.h"
+
+#include <string.h>     /* strcmp() */
+#include <sys/stat.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <libgen.h>
+#include <stdlib.h>
 
 /* Forward declaration */
 module AP_MODULE_DECLARE_DATA gacl_module;
@@ -296,24 +304,9 @@ null_output_filter(ap_filter_t* f, apr_bucket_brigade* b)
  * Utility methods
  */
 
-static int
-callback_print_debug(void* rec, const char* key, const char* value)
-{
-  ap_log_rerror(MY_MARK, APLOG_NOTICE, 0, (request_rec*)rec, "debug %s", value);
-  return 1;				/* not zero */
-}
-
-static int
-callback_copy_header(void* t, const char* key, const char* value)
-{
-  apr_table_add((apr_table_t*)t, key, value);
-  return 1;				/* not zero */
-}
-
  /* This is for debugging. */
 int iterate_func(void *req, const char *key, const char *value)
 {
-    int stat;
     char *line;
     request_rec *r = (request_rec *)req;
     if (key == NULL || value == NULL || value[0] == '\0')
@@ -325,12 +318,12 @@ int iterate_func(void *req, const char *key, const char *value)
     return 1;
 }
 
-static int dump_request(request_rec *r)
+/*static int dump_request(request_rec *r)
 {
     //apr_table_do(iterate_func, r, r->headers_in, NULL);
     apr_table_do(iterate_func, r, r->subprocess_env, NULL);
     return OK;
-}
+}*/
 
 static int get_perm(char* perm){
 	  int ret = DEFAULT_PERM;
@@ -393,16 +386,16 @@ long check_timeout(request_rec *r, const char* file){
   long diff;
   
   nowtime = time((time_t *)NULL);
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current time: %d", nowtime);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current time: %d", (int) nowtime);
   if(stat(file, &attrib) < 0){
   	return 0;
   }
   mtime = attrib.st_mtime;
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "modification time of %s: %d", file, mtime);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "modification time of %s: %d", file, (int) mtime);
   diff = difftime(nowtime, mtime);
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "difference: %d <-> %d", diff, VO_TIMEOUT_SECONDS);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "difference: %d <-> %d", (int) diff, (int) VO_TIMEOUT_SECONDS);
   diff = diff - VO_TIMEOUT_SECONDS;
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "returning: %d", diff);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "returning: %d", (int) diff);
   return diff;
 }
 
@@ -415,11 +408,9 @@ check_user_id(request_rec *r)
 {
   config_rec* conf;
   request_rec* subreq;
-  const char* s, client_dn;
   char* check_file_path;
   char* gacl_vo_file;
   char* dir;
-  int st;
   int run_res = -8000;
 
   if(this_server == NULL)
@@ -474,7 +465,7 @@ check_user_id(request_rec *r)
   }
   else{
   	VO_TIMEOUT_SECONDS = conf->timeout_;
-  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "VO timeout: %l", VO_TIMEOUT_SECONDS);
+  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "VO timeout: %f", VO_TIMEOUT_SECONDS);
   }
   
   /* Find the path of the file/directory to check. */  
@@ -528,7 +519,6 @@ check_auth(request_rec *r)
   config_rec* conf;
   const char* client_dn;
   int gacl_file1_ok, gacl_file2_ok;
-  unsigned int open_ccsid = 37;
   GRSTgaclAcl   *acl1, *acl2;
   GRSTgaclPerm   perm0, perm1, perm2;
   request_rec* subreq;
@@ -610,8 +600,8 @@ check_auth(request_rec *r)
 
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found gacl files: %i %i", gacl_file1_ok, gacl_file2_ok);
     
-  	if(gacl_file1_ok >= 0 && gacl_file2_ok >= 0 ||
-  	   strcmp(pwd, DOCUMENT_ROOT) <= 0 || GACL_ROOT != NULL && strcmp(pwd, GACL_ROOT) <= 0 ||
+  	if((gacl_file1_ok >= 0 && gacl_file2_ok >= 0) ||
+  	   strcmp(pwd, DOCUMENT_ROOT) <= 0 || (GACL_ROOT != NULL && strcmp(pwd, GACL_ROOT) <= 0) ||
   	   strcmp(pwd, "/") == 0){
   		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "recursed down to: %s", pwd);
   		break;
@@ -634,7 +624,7 @@ check_auth(request_rec *r)
   perm1 = DEFAULT_PERM;
   perm2 = DEFAULT_PERM;
   
-  /* If no gacl files were found, caryy on and stick with the defaults. */
+  /* If no gacl files were found, carry on and stick with the defaults. */
   if (gacl_file1_ok >= 0 || gacl_file2_ok >= 0) {
     
     /* Find the permissions of the user in this directory. */
