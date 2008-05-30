@@ -17,7 +17,7 @@ GACL_SOURCE1 = grst_http.c
 GACL_SOURCE2 = grst_xacml.c
 GACL_SOURCE3 = grst_gacl.c
 
-PKGFILES = ${SRC2} RELEASE README Makefile samples ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
+PKGFILES = ${SRC2} RELEASE README Makefile gacl_interface ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
 
 default: all
 
