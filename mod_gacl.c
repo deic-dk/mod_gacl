@@ -166,7 +166,7 @@ static int DEFAULT_PERM = GRST_PERM_READ;
 static char* GACL_ROOT = NULL;
 
 /* VO timout in seconds */
-static long VO_TIMEOUT_SECONDS;
+int VO_TIMEOUT_SECONDS;
 
 /* Default VO timout in seconds - overridden by VOTimeoutSeconds */
 static const long DEFAULT_VO_TIMEOUT_SECONDS = 300;
@@ -191,7 +191,7 @@ typedef struct {
   char* path_;
   char* perm_;
   char* root_;
-  long timeout_;
+  int timeout_;
 } config_rec;
 
 static void*
@@ -201,7 +201,7 @@ dir_config(apr_pool_t* p, char* d)
   conf->path_ = 0;			/* null pointer */
   conf->perm_ = 0;			/* null pointer */
   conf->root_ = 0;			/* null pointer */
-  conf->timeout_ = 0;
+  conf->timeout_ = -1;
   return conf;
 }
 
@@ -238,10 +238,10 @@ config_root(cmd_parms* cmd, void* mconfig, const char* arg)
 static const char*
 config_timeout(cmd_parms* cmd, void* mconfig, const char* arg)
 {
-  if (((config_rec*)mconfig)->timeout_)
-    return "GACL root already set.";
+  if (((config_rec*)mconfig)->timeout_ > 0)
+    return "VO timeout already set.";
 
-  ((config_rec*)mconfig)->timeout_ = atol(arg);
+  ((config_rec*)mconfig)->timeout_ = atoi(arg);
   return 0;
 }
 
@@ -359,9 +359,7 @@ static void mod_gridsite_log_func(char *file, int line, int level,
 char* get_path(request_rec *r, char* req_fil)
 {
   char* pwd;
-	
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file to check '%s'", req_fil);
-  
+    
   if (((r->uri)[(strlen(r->uri)-1)]) != '/') {
 		pwd = ap_make_dirstr_parent(r->pool, req_fil);
 	}
@@ -388,6 +386,7 @@ long check_timeout(request_rec *r, const char* file){
   nowtime = time((time_t *)NULL);
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current time: %d", (int) nowtime);
   if(stat(file, &attrib) < 0){
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "GACL file not there: %s", file);
   	return 0;
   }
   mtime = attrib.st_mtime;
@@ -397,6 +396,65 @@ long check_timeout(request_rec *r, const char* file){
   diff = diff - VO_TIMEOUT_SECONDS;
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "returning: %d", (int) diff);
   return diff;
+}
+
+static void find_gacl_file(request_rec* r, char* pwd){
+
+  /* Recurse upwards until .gacl file is found. */
+  int gacl_file1_ok = -1;
+  int gacl_file2_ok = -1;
+  unsigned int rec = 0;
+  
+  if ((chdir(pwd)) != 0) {
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "could not change to %s", pwd);
+    return;
+  }
+
+  while(rec < MAX_RECURSE && gacl_file1_ok < 0){
+    
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current dir: %s", pwd);
+    
+    if (gacl_file1_ok < 0){
+      gacl_file1_ok = open(gacl_file, oflag);
+      if (gacl_file1_ok >= 0){
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL1 from: '%s'", gacl_file);
+        //acl1 = GRSTgaclAclLoadFile((char*)gacl_file);
+        close(gacl_file1_ok);
+      }
+    }
+    if (gacl_file2_ok < 0){
+      gacl_file2_ok = open(gacl_vo_file, oflag);
+      if (gacl_file2_ok >= 0){
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL2 from: '%s'", gacl_vo_file);
+        //acl2 = GRSTgaclAclLoadFile((char*)gacl_vo_file);
+        close(gacl_file2_ok);
+      }
+    }
+
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found gacl files: %i %i", gacl_file1_ok, gacl_file2_ok);
+    
+    if(gacl_file1_ok >= 0 ||
+       (GACL_ROOT == NULL && strcmp(pwd, DOCUMENT_ROOT) < 0) ||
+       (GACL_ROOT != NULL && strcmp(pwd, GACL_ROOT) < 0) ||
+       strcmp(pwd, "/") == 0){
+       ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "recursed down to: %s, %s , %s", pwd, DOCUMENT_ROOT,
+                    GACL_ROOT);
+      break;
+    }
+
+    pwd = apr_pstrcat (r->pool, pwd, "/..", NULL);
+
+    if ((chdir(pwd)) != 0) {
+      ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "could not change to parent of %s", pwd);
+      break;
+    }
+
+    pwd = (char*) getcwd(NULL, 0);
+        
+    ++rec;
+    
+  }
+
 }
 
 /** 
@@ -409,7 +467,7 @@ check_user_id(request_rec *r)
   config_rec* conf;
   request_rec* subreq;
   char* check_file_path;
-  char* gacl_vo_file;
+  char* gacl_vo_file_path;
   char* dir;
   int run_res = -8000;
 
@@ -434,38 +492,14 @@ check_user_id(request_rec *r)
   /*if (conf->type_ == type_unset)
     return DECLINED;*/
 
-  /* continue only if the requested file actually exists. */
-  if(GACL_ROOT == NULL && (access(r->filename, oflag)) < 0)
-    return OK;
-
-  if (conf->perm_ == 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "default permission not configured properly");
-    /* Default permission not configured properly; leaving DEFAULT_PERM as it is. */
-  }
-  else{
-  	DEFAULT_PERM = get_perm(conf->perm_);
-  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "default permission: %i", DEFAULT_PERM);
-  }
-  
-  if (conf->perm_ == 0) {
+  GACL_ROOT = conf->root_;
+  if (conf->root_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "GACL root not configured properly");
     /* Default permission not configured properly; leaving GACL_ROOT as NULL -
      * meaning GACL files are assumed to be next to the files served. */
   }
   else{
-  	GACL_ROOT = conf->root_;
-  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "GACL root: %s", GACL_ROOT);
-  }
-  
-  if (conf->timeout_ == 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO timeout not configured properly");
-    /* Default permission not configured properly; leaving GACL_ROOT as NULL -
-     * meaning GACL files are assumed to be next to the files served. */
-    VO_TIMEOUT_SECONDS = DEFAULT_VO_TIMEOUT_SECONDS;
-  }
-  else{
-  	VO_TIMEOUT_SECONDS = conf->timeout_;
-  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "VO timeout: %f", VO_TIMEOUT_SECONDS);
+    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "GACL root: %s", GACL_ROOT);
   }
   
   /* Find the path of the file/directory to check. */  
@@ -476,21 +510,44 @@ check_user_id(request_rec *r)
     check_file_path = apr_pstrcat(r->pool, GACL_ROOT, r->uri, NULL);
   }
   
-  /* Run sync script only if last check was done longer ago than VO_TIMEOUT_SECONDS */
-  dir = get_path(r, check_file_path);
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "dir: %s", dir);
-  gacl_vo_file = apr_pstrcat(r->pool, dir, "/.gacl_vo", NULL);
+  /* Continue only if the requested file actually exists. */
+  if(access(check_file_path, oflag) < 0)
+    return OK;
+
+  if (conf->perm_ == NULL) {
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "default permission not configured properly");
+    /* Default permission not configured properly; leaving DEFAULT_PERM as it is. */
+  }
+  else{
+    DEFAULT_PERM = get_perm(conf->perm_);
+    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "default permission: %i", DEFAULT_PERM);
+  }
   
+  if (conf->timeout_ < 0) {
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO timeout not configured properly");
+    /* Default permission not configured properly; leaving GACL_ROOT as NULL -
+     * meaning GACL files are assumed to be next to the files served. */
+    VO_TIMEOUT_SECONDS = DEFAULT_VO_TIMEOUT_SECONDS;
+  }
+  else{
+    VO_TIMEOUT_SECONDS = conf->timeout_;
+    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "VO timeout: %i", VO_TIMEOUT_SECONDS);
+  }
+  
+  /* Run sync script only if last check was done longer ago than VO_TIMEOUT_SECONDS */
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file to check '%s'", check_file_path);
+  dir = get_path(r, check_file_path);
+  find_gacl_file(r, dir);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "dir: %s", dir);
+  gacl_vo_file_path = apr_pstrcat(r->pool, dir, gacl_vo_file, NULL);
   if (conf->path_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO sync script not configured properly");
     return OK;			/* VO sync script not configured properly; not running script, returning OK anyway. */
   }
   else{
-    if( check_timeout(r, gacl_vo_file) < 0 ){
+    if( check_timeout(r, gacl_vo_file_path) < 0 ){
   	  return OK;
     }
-    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "will run script: %s", conf->path_);
-    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "for %s", r->uri);
   }
 
   char * command = apr_pstrcat(r->pool, conf->path_, " ", check_file_path, NULL);
@@ -528,9 +585,18 @@ check_auth(request_rec *r)
   unsigned int rec = 0;
   char* req_fil;
   char* pwd;
+  char* check_file_path;
+  
+  /* Find the path of the file/directory to check. */  
+  if (GACL_ROOT == NULL) {
+    check_file_path = r->filename;
+  }
+  else{
+    check_file_path = apr_pstrcat(r->pool, GACL_ROOT, r->uri, NULL);
+  }
   
   /* Continue only if the requested file actually exists. */
-  if(GACL_ROOT == NULL && (access(r->filename,oflag)) < 0)
+  if(access(check_file_path, oflag) < 0)
     return OK;
 
   /* Thanks to "chuck.morris AT ngc.com". */
@@ -571,56 +637,28 @@ check_auth(request_rec *r)
   /* Load the ACLs off the disk. */
   pwd = (char*) getcwd(NULL, 0);
   
+  find_gacl_file(r, pwd);
+  
   /* Recurse upwards until .gacl and .gacl_vo files are found. */
   gacl_file1_ok = -1;
   gacl_file2_ok = -1;
   acl1 = NULL;
   acl2 = NULL;
   
-  while(rec < MAX_RECURSE && (gacl_file1_ok < 0 || gacl_file2_ok < 0)){
-    
-  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current dir: %s", pwd);
-  	
-    if (gacl_file1_ok < 0){
-      gacl_file1_ok = open(gacl_file, oflag);
-      if (gacl_file1_ok >= 0){
-        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL1 from: '%s'", gacl_file);
-        acl1 = GRSTgaclAclLoadFile((char*)gacl_file);
-        close(gacl_file1_ok);
-      }
-    }
-    if (gacl_file2_ok < 0){
-      gacl_file2_ok = open(gacl_vo_file, oflag);
-      if (gacl_file2_ok >= 0){
-        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL2 from: '%s'", gacl_vo_file);
-        acl2 = GRSTgaclAclLoadFile((char*)gacl_vo_file);
-        close(gacl_file2_ok);
-      }
-    }
-
-    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found gacl files: %i %i", gacl_file1_ok, gacl_file2_ok);
-    
-  	if((gacl_file1_ok >= 0 && gacl_file2_ok >= 0) ||
-  	   strcmp(pwd, DOCUMENT_ROOT) <= 0 || (GACL_ROOT != NULL && strcmp(pwd, GACL_ROOT) <= 0) ||
-  	   strcmp(pwd, "/") == 0){
-  		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "recursed down to: %s", pwd);
-  		break;
-  	}
-
-  	//sprintf(pwd, "%s%s", pwd, "/..");
-  	pwd = apr_pstrcat (r->pool, pwd, "/..", NULL);
-
-    if ((chdir(pwd)) != 0) {
-      ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "could not change to parent of %s", pwd);
-      break;
-    }
-
-    pwd = (char*) getcwd(NULL, 0);
-  	  	
-    ++rec;
-    
+  /* Load the ACLs. */
+  gacl_file1_ok = open(gacl_file, oflag);
+  if (gacl_file1_ok >= 0){
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL1 from: '%s'", gacl_file);
+    acl1 = GRSTgaclAclLoadFile((char*)gacl_file);
+    close(gacl_file1_ok);
   }
-  
+  gacl_file2_ok = open(gacl_vo_file, oflag);
+  if (gacl_file2_ok >= 0){
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL2 from: '%s'", gacl_vo_file);
+    acl2 = GRSTgaclAclLoadFile((char*)gacl_vo_file);
+    close(gacl_file2_ok);
+  }
+
   perm1 = DEFAULT_PERM;
   perm2 = DEFAULT_PERM;
   
@@ -681,7 +719,6 @@ check_auth(request_rec *r)
   return HTTP_UNAUTHORIZED;
     
 }
-
 
 /**
  * Initialize
