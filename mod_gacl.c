@@ -437,8 +437,8 @@ static void find_gacl_file(request_rec* r, char* pwd){
        (GACL_ROOT == NULL && strcmp(pwd, DOCUMENT_ROOT) < 0) ||
        (GACL_ROOT != NULL && strcmp(pwd, GACL_ROOT) < 0) ||
        strcmp(pwd, "/") == 0){
-       ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "recursed down to: %s, %s , %s", pwd, DOCUMENT_ROOT,
-                    GACL_ROOT);
+       ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "recursed down to: %s, %s , %s, %i",
+       pwd, DOCUMENT_ROOT, GACL_ROOT, gacl_file1_ok);
       break;
     }
 
@@ -510,10 +510,6 @@ check_user_id(request_rec *r)
     check_file_path = apr_pstrcat(r->pool, GACL_ROOT, r->uri, NULL);
   }
   
-  /* Continue only if the requested file actually exists. */
-  if(access(check_file_path, oflag) < 0)
-    return OK;
-
   if (conf->perm_ == NULL) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "default permission not configured properly");
     /* Default permission not configured properly; leaving DEFAULT_PERM as it is. */
@@ -523,6 +519,12 @@ check_user_id(request_rec *r)
     ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "default permission: %i", DEFAULT_PERM);
   }
   
+  /* Continue only if the requested file actually exists. */
+  if(access(check_file_path, oflag) < 0){
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "File does not exist: %s", check_file_path);
+    return OK;
+  }
+
   if (conf->timeout_ < 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO timeout not configured properly");
     /* Default permission not configured properly; leaving GACL_ROOT as NULL -
@@ -587,6 +589,16 @@ check_auth(request_rec *r)
   char* pwd;
   char* check_file_path;
   
+  if (r->method_number == M_GET)
+    perm0 = GRST_PERM_READ;
+
+  if (r->method_number == M_PUT || r->method_number == M_MKCOL ||
+      r->method_number == M_COPY || r->method_number == M_MOVE)
+    perm0 = GRST_PERM_WRITE;
+
+  if (r->method_number == M_PROPFIND)
+    perm0 = GRST_PERM_LIST;
+
   /* Find the path of the file/directory to check. */  
   if (GACL_ROOT == NULL) {
     check_file_path = r->filename;
@@ -596,8 +608,15 @@ check_auth(request_rec *r)
   }
   
   /* Continue only if the requested file actually exists. */
-  if(access(check_file_path, oflag) < 0)
-    return OK;
+  if(access(check_file_path, oflag) < 0){
+    if(((DEFAULT_PERM & perm0 ) != 0)){
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
+      return OK;
+    }
+    else{
+      return HTTP_UNAUTHORIZED;
+    }
+  }
 
   /* Thanks to "chuck.morris AT ngc.com". */
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
@@ -692,16 +711,6 @@ check_auth(request_rec *r)
   if(perm1 < 0 || perm2 < 0){
   	return HTTP_UNAUTHORIZED;
   }
-
-  if (r->method_number == M_GET)
-    perm0 = GRST_PERM_READ;
-
-  if (r->method_number == M_PUT || r->method_number == M_MKCOL ||
-      r->method_number == M_COPY || r->method_number == M_MOVE)
-    perm0 = GRST_PERM_WRITE;
-
-  if (r->method_number == M_PROPFIND)
-    perm0 = GRST_PERM_LIST;
 
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "PERM0: '%i'", perm0);
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "(perm1 & perm0 ): '%i'", (perm1 & perm0 ));
