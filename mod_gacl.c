@@ -327,22 +327,22 @@ int iterate_func(void *req, const char *key, const char *value)
 
 static int get_perm(char* perm){
 	  int ret = DEFAULT_PERM;
-		if(strcmp(perm, "none") == 0){
+		if(apr_strnatcasecmp(perm, "none") == 0){
 			ret = GRST_PERM_NONE;
 		}
-		else if(strcmp(perm, "read") == 0){
+		else if(apr_strnatcasecmp(perm, "read") == 0){
 			ret = GRST_PERM_READ;
 		}
-		else if(strcmp(perm, "exec") == 0){
+		else if(apr_strnatcasecmp(perm, "exec") == 0){
 			ret = GRST_PERM_EXEC;
 		}
-		else if(strcmp(perm, "list") == 0){
+		else if(apr_strnatcasecmp(perm, "list") == 0){
 			ret = GRST_PERM_LIST;
 		}
-		else if(strcmp(perm, "write") == 0){
+		else if(apr_strnatcasecmp(perm, "write") == 0){
 			ret = GRST_PERM_WRITE;
 		}
-		else if(strcmp(perm, "admin") == 0){
+		else if(apr_strnatcasecmp(perm, "admin") == 0){
 			ret = GRST_PERM_ADMIN;
 		}
 	  ap_log_error(MY_MARK, APLOG_INFO, 0, this_server, "parsed permission: %s", perm);
