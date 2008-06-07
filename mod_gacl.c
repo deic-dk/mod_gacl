@@ -345,8 +345,9 @@ static int get_perm(char* perm){
 		else if(apr_strnatcasecmp(perm, "admin") == 0){
 			ret = GRST_PERM_ADMIN;
 		}
-	  ap_log_error(MY_MARK, APLOG_INFO, 0, this_server, "parsed permission: %s", perm);
-	  ap_log_error(MY_MARK, APLOG_INFO, 0, this_server, "--> %i", ret);
+	  ap_log_error(MY_MARK, APLOG_DEBUG, 0, this_server, "parsed permission: %s", perm);
+    ap_log_error(MY_MARK, APLOG_DEBUG, 0, this_server, "%i", perm);
+	  ap_log_error(MY_MARK, APLOG_DEBUG, 0, this_server, "--> %i", ret);
     return ret;
 }
 
@@ -470,6 +471,7 @@ check_user_id(request_rec *r)
   char* gacl_vo_file_path;
   char* dir;
   int run_res = -8000;
+  char* pwd;
 
   if(this_server == NULL)
     this_server = r->server;
@@ -520,7 +522,7 @@ check_user_id(request_rec *r)
   }
   
   /* Continue only if the requested file actually exists. */
-  if(access(check_file_path, oflag) < 0){
+  if(r->method_number == M_GET && access(check_file_path, oflag) < 0){
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "File does not exist: %s", check_file_path);
     return OK;
   }
@@ -540,8 +542,9 @@ check_user_id(request_rec *r)
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file to check '%s'", check_file_path);
   dir = get_path(r, check_file_path);
   find_gacl_file(r, dir);
+  pwd = (char*) getcwd(NULL, 0);
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "dir: %s", dir);
-  gacl_vo_file_path = apr_pstrcat(r->pool, dir, gacl_vo_file, NULL);
+  gacl_vo_file_path = apr_pstrcat(r->pool, pwd, "/"/*dir*/, gacl_vo_file, NULL);
   if (conf->path_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO sync script not configured properly");
     return OK;			/* VO sync script not configured properly; not running script, returning OK anyway. */
@@ -593,7 +596,8 @@ check_auth(request_rec *r)
     perm0 = GRST_PERM_READ;
 
   if (r->method_number == M_PUT || r->method_number == M_MKCOL ||
-      r->method_number == M_COPY || r->method_number == M_MOVE)
+      r->method_number == M_COPY || r->method_number == M_MOVE ||
+      r->method_number == M_DELETE)
     perm0 = GRST_PERM_WRITE;
 
   if (r->method_number == M_PROPFIND)
@@ -608,7 +612,7 @@ check_auth(request_rec *r)
   }
   
   /* Continue only if the requested file actually exists. */
-  if(access(check_file_path, oflag) < 0){
+  if(r->method_number == M_GET && access(check_file_path, oflag) < 0){
     if(((DEFAULT_PERM & perm0 ) != 0)){
       ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
       return OK;
