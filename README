@@ -1,7 +1,7 @@
-******************
-***  mod_gacl  ***
-*  Apache module *
-******************
+*************************
+******  mod_gacl  *******
+***  Apache module  *****
+*************************
 
 by Frederik Orellana,
 Niels Bohr Institute,
@@ -34,6 +34,6 @@ A sample Apache configuration file is provided ("grid.conf").
 You may want to copy this to your virtual hosts directory - and
 modify it to suit your Apache setup.
 You should also copy the sample VO script ("mk_vo.sh") to the
-location specified in the Apache configuration (/usr/local/bin).
+location specified in the Apache configuration (AuthScriptFile).
 
 For more information, please consult the code.
