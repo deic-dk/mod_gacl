@@ -32,6 +32,7 @@ GACL_FILE=".gacl"
 GACL_VO_FILE=".gacl_vo"
 DN_LIST_TAG="dn-list"
 DN_LIST_URL_TAG="url"
+MAX_RECURSE=12
 
 #
 # First find the directory containing the .gacl file to check.
@@ -57,6 +58,7 @@ fi
 
 # Recurse upwards until a .gacl file is found.
 
+i=0
 while [ "$dir" != "$DOCUMENT_ROOT" -a "$dir" != "/" ]; do
   if [ -e $dir/$GACL_FILE ]; then
     echo "Found $GACL_FILE file in $dir"
@@ -65,6 +67,14 @@ while [ "$dir" != "$DOCUMENT_ROOT" -a "$dir" != "/" ]; do
   fi
   # Go one level up.
   dir=`echo $dir | sed -r 's|(.*)/$|\1|' | sed -r 's|(.*)/[^/]+|\1|'`
+  if [ -z "$dir" ]; then
+    dir="/"
+  fi
+  i=`expr $i + 1` 
+  echo $i 
+  if [ $i -gt $MAX_RECURSE ]; then
+    break
+  fi
 done
 
 if [ ! -e $GACL_FILE ]; then

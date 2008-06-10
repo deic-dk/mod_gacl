@@ -368,7 +368,7 @@ char* get_path(request_rec *r, char* req_fil)
 		pwd = req_fil;
 	}
 	
-	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found '%s'", pwd);
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "Path: '%s'", pwd);
 	
 	return pwd;
 }
@@ -397,6 +397,21 @@ long check_timeout(request_rec *r, const char* file){
   diff = diff - VO_TIMEOUT_SECONDS;
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "returning: %d", (int) diff);
   return diff;
+}
+
+static int check_paths(char* c_dir, char* b_dir){
+  if(strstr(c_dir, b_dir) == c_dir){
+    if(strlen(c_dir) == strlen(b_dir)){
+      return 0;
+    }
+    if(strlen(c_dir) == strlen(b_dir) + 1 && c_dir[(strlen(c_dir)-1)] == '/'){
+      return 0;
+    }
+    if(strlen(b_dir) == strlen(c_dir) + 1 && b_dir[(strlen(b_dir)-1)] == '/'){
+      return 0;
+    }
+  }
+  return -1;
 }
 
 static void find_gacl_file(request_rec* r, char* pwd){
@@ -435,8 +450,8 @@ static void find_gacl_file(request_rec* r, char* pwd){
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found gacl files: %i %i", gacl_file1_ok, gacl_file2_ok);
     
     if(gacl_file1_ok >= 0 ||
-       (GACL_ROOT == NULL && strcmp(pwd, DOCUMENT_ROOT) < 0) ||
-       (GACL_ROOT != NULL && strcmp(pwd, GACL_ROOT) < 0) ||
+       (GACL_ROOT == NULL && check_paths(pwd, DOCUMENT_ROOT) == 0) ||
+       (GACL_ROOT != NULL && check_paths(pwd, GACL_ROOT) == 0) ||
        strcmp(pwd, "/") == 0){
        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "recursed down to: %s, %s , %s, %i",
        pwd, DOCUMENT_ROOT, GACL_ROOT, gacl_file1_ok);
@@ -496,12 +511,12 @@ check_user_id(request_rec *r)
 
   GACL_ROOT = conf->root_;
   if (conf->root_ == 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "GACL root not configured properly");
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "GACL root not configured.");
     /* Default permission not configured properly; leaving GACL_ROOT as NULL -
      * meaning GACL files are assumed to be next to the files served. */
   }
   else{
-    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "GACL root: %s", GACL_ROOT);
+    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "GACL root: %s.", GACL_ROOT);
   }
   
   /* Find the path of the file/directory to check. */  
@@ -513,40 +528,40 @@ check_user_id(request_rec *r)
   }
   
   if (conf->perm_ == NULL) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "default permission not configured properly");
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "Default permission not configured.");
     /* Default permission not configured properly; leaving DEFAULT_PERM as it is. */
   }
   else{
     DEFAULT_PERM = get_perm(conf->perm_);
-    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "default permission: %i", DEFAULT_PERM);
+    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "Default permission: %i.", DEFAULT_PERM);
   }
   
   /* Continue only if the requested file actually exists. */
   if(r->method_number == M_GET && access(check_file_path, oflag) < 0){
-    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "File does not exist: %s", check_file_path);
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "File does not exist: %s.", check_file_path);
     return OK;
   }
 
   if (conf->timeout_ < 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO timeout not configured properly");
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO timeout not configured.");
     /* Default permission not configured properly; leaving GACL_ROOT as NULL -
      * meaning GACL files are assumed to be next to the files served. */
     VO_TIMEOUT_SECONDS = DEFAULT_VO_TIMEOUT_SECONDS;
   }
   else{
     VO_TIMEOUT_SECONDS = conf->timeout_;
-    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "VO timeout: %i", VO_TIMEOUT_SECONDS);
+    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "VO timeout: %i.", VO_TIMEOUT_SECONDS);
   }
   
   /* Run sync script only if last check was done longer ago than VO_TIMEOUT_SECONDS */
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file to check '%s'", check_file_path);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "File to check '%s'.", check_file_path);
   dir = get_path(r, check_file_path);
   find_gacl_file(r, dir);
   pwd = (char*) getcwd(NULL, 0);
-  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "dir: %s", dir);
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "Dir: %s.", dir);
   gacl_vo_file_path = apr_pstrcat(r->pool, pwd, "/"/*dir*/, gacl_vo_file, NULL);
   if (conf->path_ == 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO sync script not configured properly");
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO sync script not configured.");
     return OK;			/* VO sync script not configured properly; not running script, returning OK anyway. */
   }
   else{
