@@ -28,12 +28,16 @@ libxml2 and Apache-2 installed.
 A simple Makefile is provided for building a DSO module.
 To build on a UNIX-like system, type 'make'.
 
-To install the module either type 'make install' or simply copy
-".libs/mod_gacl.so" to your Apache modules directory.
+To install the module either type 'make install' or copy
+".libs/mod_gacl.so" to your Apache modules directory and libgacl.so.1.6.0
+to /usr/lib and make a soft-link, libgacl.so, in /usr/lib, pointing to
+libgacl.so.1.6.0.
+
 A sample Apache configuration file is provided ("grid.conf").
 You may want to copy this to your virtual hosts directory - and
-modify it to suit your Apache setup.
+modify it to suit your Apache setup. In particular you should set
+the ServerName, ErrorLog and CustomLog directives.
 You should also copy the sample VO script ("mk_vo.sh") to the
-location specified in the Apache configuration (AuthScriptFile).
+location specified in "grid.conf" (AuthScriptFile).
 
 For more information, please consult the code.
