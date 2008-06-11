@@ -346,7 +346,6 @@ static int get_perm(char* perm){
 			ret = GRST_PERM_ADMIN;
 		}
 	  ap_log_error(MY_MARK, APLOG_DEBUG, 0, this_server, "parsed permission: %s", perm);
-    ap_log_error(MY_MARK, APLOG_DEBUG, 0, this_server, "%i", perm);
 	  ap_log_error(MY_MARK, APLOG_DEBUG, 0, this_server, "--> %i", ret);
     return ret;
 }
@@ -602,7 +601,6 @@ check_auth(request_rec *r)
   GRSTerrorLogFunc = mod_gridsite_log_func;
   GRSTgaclCred* usercred;
   GRSTgaclUser  *user;
-  unsigned int rec = 0;
   char* req_fil;
   char* pwd;
   char* check_file_path;
