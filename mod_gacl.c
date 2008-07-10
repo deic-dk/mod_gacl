@@ -59,6 +59,8 @@
  *   DefaultPermission  "permission string"
  *      Specifies default permission for directories with no .gacl file.
  *      Must be one of none, read, exec, list, write, admin.
+ *      Notice: it also seems to affect directory listings: if set to none
+ *              listings are not allowed - even by DNs allowed in the .gacl file.
  * 
  *   GACLRoot  "path"
  *      Specifies alternative path to use when checking for .gacl files.
