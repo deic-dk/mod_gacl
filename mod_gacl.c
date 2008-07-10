@@ -104,7 +104,7 @@
  * 
  * - <dn-list><url>...</url><dn-list> objects are checked.
  * 
- * - Objects of this last type, say <dn-list-url>https://some.url/vo.txt</dn-list-url>
+ * - Objects of this last type, say <dn-list><url>https://some.url/vo.txt</dn-list><url>
  *   should be parsed by the script AuthScriptFile
  *   This URL must be an HTTPS or HTTP URL of a text file, containing a list of DN's.
  *   If given, mod_gacl calls the external application given as AuthScriptFile in the Apache
