@@ -85,12 +85,14 @@ fi
 #
 # Check if the .gacl file contains elements of the form
 # <dn-list><url>https://some.url/vo.txt</url></dn-list>.
-# If it does, construct list of URLs.
+# If it does, construct list of URLs. If it does not,
+# delete any existing .gacl_vo file.
 #
 
 check=`grep "<$DN_LIST_TAG>" $GACL_FILE`
 if [ -z "$check" ]; then
   echo "no $DN_LIST_URL_TAG tag found"
+  rm -f $GACL_VO_FILE
   exit 0
 fi
 
