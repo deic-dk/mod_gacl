@@ -358,22 +358,82 @@ static void mod_gridsite_log_func(char *file, int line, int level,
 	ap_log_error(MY_MARK, APLOG_INFO, 0, this_server, fmt);
 }
 
-char* get_path(request_rec *r, char* req_fil)
-{
-  char* pwd;
-    
-  if (((r->uri)[(strlen(r->uri)-1)]) != '/') {
-		pwd = ap_make_dirstr_parent(r->pool, req_fil);
-	}
-	else{
-		pwd = req_fil;
-	}
-	
-	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "Path: '%s'", pwd);
-	
-	return pwd;
+/**
+ * Resolve target of link.
+ */
+ void resolve_target(request_rec *r, char* req_fil, char* path, size_t buf_size){
+ 	
+  ssize_t size;
+  struct stat stat_buf;
+  char *path2;
+  
+  apr_cpystrn(path, req_fil, strlen(req_fil)+1);
+  path2 = (char*)apr_pcalloc(r->pool, buf_size);
+ 	while(1){
+    int i;
+    size = readlink (path2, path, buf_size - 1);
+    if (size == -1) {
+	    break;
+    }
+    /* readlink() success. */
+    path[size] = '\0';
+    /* Check whether the symlink's target is also a symlink.
+     * We want to get the final target. */
+    i = stat(path, &stat_buf);
+    if(i == -1){
+	    /* Error. */
+	    break;
+    }
+    /* stat() success. */
+    if(!S_ISLNK (stat_buf.st_mode)){
+	    /* path is not a symlink. Done. */
+	    return;
+    }
+    /* path is a symlink. Continue loop and resolve this. */
+    apr_cpystrn(path, path2, strlen(path2)+1);
+  }
 }
 
+char* get_path(request_rec *r, char* req_fil)
+{
+	
+	/* If req_fil ends with a slash, assume it's a directory. */
+	if (((r->uri)[(strlen(r->uri)-1)]) == '/') {
+		return req_fil;
+	}
+	
+  char* pwd;
+  int serr;
+  struct stat sbuf;
+  
+  /* Check if req_fil exists and is a directory. */
+  if((access(req_fil, oflag)) == 0){
+		serr = stat(req_fil, &sbuf);
+		if (!serr){
+		  if(S_ISDIR(sbuf.st_mode)){
+		  	return req_fil;
+		  }
+		  if(S_ISLNK(sbuf.st_mode)){
+		  	size_t buf_size;
+		    if(sizeof (req_fil) > SSIZE_MAX){
+          buf_size = SSIZE_MAX - 1;
+ 	      }
+        else{
+          buf_size = PATH_MAX - 1;
+        }	  	
+		  	char* path = (char*)apr_pcalloc(r->pool, buf_size);
+		  	resolve_target(r, req_fil, path, buf_size);
+		  	return path;
+		  }
+		}
+  }
+  
+  /* If req_fil does not end with a / and has been confirmed not to be a
+     directory, find the parent. */
+  pwd = ap_make_dirstr_parent(r->pool, req_fil);
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "Path: '%s'", pwd);
+	return pwd;
+}
 
 /**
  * Return ("current date" - "modification date") - timeout
