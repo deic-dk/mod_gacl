@@ -33,6 +33,7 @@ GACL_VO_FILE=".gacl_vo"
 DN_LIST_TAG="dn-list"
 DN_LIST_URL_TAG="url"
 MAX_RECURSE=12
+TMP_FILE="/tmp/gacl_tmp_vo.txt"
 
 #
 # First find the directory containing the .gacl file to check.
@@ -142,7 +143,13 @@ for url in $url_list; do
   perms=`echo "$perms" | sed -r "s|.*$url1([^\t]+)\t.*|\1|"`
   echo URL: "$url"
   echo PERMS: "$perms"
-  curl --insecure $url 2>/dev/null | sed 's/\"//g' | while read name; do
+  curl --insecure $url 2>/dev/null > $TMP_FILE
+  ## Make sure we have a newline at the end. Otherwise read will ignore the last line
+  echo >> $TMP_FILE
+  cat /$TMP_FILE | sed 's/\"//g' | while read name; do
+  if [ -z "$name" ]; then
+    continue
+  fi
 cat >> $GACL_VO_FILE <<EOF
   <entry>
     <person>
@@ -153,4 +160,5 @@ cat >> $GACL_VO_FILE <<EOF
 EOF
   done
 done
+rm $TMP_FILE
 echo "</gacl>" >> $GACL_VO_FILE
