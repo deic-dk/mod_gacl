@@ -167,3 +167,9 @@ EOF
 done
 rm $TMP_FILE
 echo "</gacl>" >> $GACL_VO_FILE
+
+ok=`grep -r -v '^</*gacl>$' $GACL_VO_FILE`
+if [ -z "$ok" ]; then
+  echo "VO file empty, deleting GACL VO file."
+  rm $GACL_VO_FILE
+fi
