@@ -79,6 +79,7 @@ done
 
 if [ ! -e $GACL_FILE ]; then
   echo "no $GACL_FILE file found"
+  rm -f $GACL_VO_FILE
   exit -2
 fi
 
