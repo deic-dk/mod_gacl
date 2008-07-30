@@ -150,6 +150,11 @@ for url in $url_list; do
   if [ -z "$name" ]; then
     continue
   fi
+  ## Ignore comments
+  test=`echo $name | sed -r 's|^\s*#.*$||'`
+  if [ -z "$test" ]; then
+    continue
+  fi
 cat >> $GACL_VO_FILE <<EOF
   <entry>
     <person>
