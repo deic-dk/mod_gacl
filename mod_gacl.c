@@ -460,8 +460,11 @@ long check_timeout(request_rec *r, const char* file){
   return diff;
 }
 
+/**
+ * Check if the two paths c_dir is and to b_dir represent the same directory.
+ */
 static int check_paths(char* c_dir, char* b_dir){
-  if(strstr(c_dir, b_dir) == c_dir){
+  if(strstr(c_dir, b_dir) != NULL || strstr(b_dir, c_dir) != NULL){
     if(strlen(c_dir) == strlen(b_dir)){
       return 0;
     }
