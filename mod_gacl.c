@@ -398,7 +398,7 @@ char* get_path(request_rec *r, char* req_fil)
 {
 	
 	/* If req_fil ends with a slash, assume it's a directory. */
-	if (((r->uri)[(strlen(r->uri)-1)]) == '/') {
+	if (((r->uri)[(strlen(r->uri)-1)]) == '/' && r->method_number != M_PUT && r->method_number != M_MKCOL) {
 		return req_fil;
 	}
 	
@@ -406,6 +406,14 @@ char* get_path(request_rec *r, char* req_fil)
   int serr;
   struct stat sbuf;
   
+  size_t buf_size;
+  if(sizeof (req_fil) > SSIZE_MAX){
+    buf_size = SSIZE_MAX - 1;
+  }
+  else{
+    buf_size = PATH_MAX - 1;
+  }     
+
   /* Check if req_fil exists and is a directory. */
   if((access(req_fil, oflag)) == 0){
 		serr = stat(req_fil, &sbuf);
@@ -414,13 +422,6 @@ char* get_path(request_rec *r, char* req_fil)
 		  	return req_fil;
 		  }
 		  if(S_ISLNK(sbuf.st_mode)){
-		  	size_t buf_size;
-		    if(sizeof (req_fil) > SSIZE_MAX){
-          buf_size = SSIZE_MAX - 1;
- 	      }
-        else{
-          buf_size = PATH_MAX - 1;
-        }	  	
 		  	char* path = (char*)apr_pcalloc(r->pool, buf_size);
 		  	resolve_target(r, req_fil, path, buf_size);
 		  	return path;
@@ -430,7 +431,15 @@ char* get_path(request_rec *r, char* req_fil)
   
   /* If req_fil does not end with a / and has been confirmed not to be a
      directory, find the parent. */
-  pwd = ap_make_dirstr_parent(r->pool, req_fil);
+  if(req_fil[(strlen(req_fil)-1)] == '/'){
+    char* path;
+    path = (char*)apr_pcalloc(r->pool, buf_size);
+    apr_cpystrn(path, req_fil, strlen(req_fil));
+    pwd = ap_make_dirstr_parent(r->pool, path);
+  }
+  else{
+    pwd = ap_make_dirstr_parent(r->pool, req_fil);
+  }
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "Path: '%s'", pwd);
 	return pwd;
 }
@@ -559,12 +568,12 @@ check_user_id(request_rec *r)
     DOCUMENT_ROOT = (char*) ap_document_root(r);
 
   /* Check if there is a request loop. */
-  for (subreq = r->main; subreq != 0; subreq = subreq->main) {
+  /*for (subreq = r->main; subreq != 0; subreq = subreq->main) {
     if (strcmp(subreq->uri, r->uri) == 0) {
       ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "request loop getting '%s'; the script cannot be inside the protected directory itself.", subreq->uri);
       return DECLINED;
     }
-  }
+  }*/
 
   /* Get config. */
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
