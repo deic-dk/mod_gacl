@@ -79,12 +79,11 @@
  *
  * The directives given below are mandatory. AuthType should be "Basic".
  * AuthName can be provided to prompt a browser dialog. Please note that
- * the "require" directive is required, but the actual content of the
+ * the Require directive is required, but the actual content of the
  * directive is meaningless.
  * 
  *   AuthType        Basic
  *   AuthName        "authentication realm"
- *   AuthScriptFile  "OS path to the program"
  *   Require         valid-user
  *
  *******************************************************************************
