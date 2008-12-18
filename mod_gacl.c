@@ -560,6 +560,12 @@ check_user_id(request_rec *r)
   int run_res = -8000;
   char* pwd;
 
+  if (r->per_dir_config == NULL) {
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "per_dir_config is null! Maybe you do not have Directory tags in your configuration");
+    return DECLINED;    
+  } 
+
+
   if(this_server == NULL)
     this_server = r->server;
     
