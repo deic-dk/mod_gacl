@@ -50,9 +50,20 @@
  *
  *******************************************************************************
  * 
- * This module does authentication/authorization via GACL. In order to support
- * virtual organizations, an external synchronization program (see below) can be
- * provided as a local script. The script wil receive the argument REQUEST_URI.
+ * This module does authorization via GACL.
+ * 
+ * The identity of the principal to be authorized is taken from the environment
+ * variable SSL_CLIENT_S_DN. This variable is set by mod_ssl to the distinguished
+ * name of the client certificate which the principal has used for authentication.
+ * RFC 3820 client proxy certificates are supported with OpenSSL>=0.9.8. To have
+ * OpenSSL accept them, the following should be added to /etc/sysconfig/httpd,
+ * /etc/init.d/httpd or an equivalent file:
+ * 
+ * export OPENSSL_ALLOW_PROXY_CERTS=2
+ * 
+ * In order to support virtual organizations, an external synchronization
+ * program (see below) can be provided as a local script. The script will
+ * receive the argument REQUEST_URI.
  *
  * This module provides following configuration directives:
  * 
@@ -154,8 +165,16 @@ static const char* myname = "mod_gacl";
 static const char* gacl_file = ".gacl";
 static const char* gacl_vo_file = ".gacl_vo";
 
-/* Apache environment variable */
-static const char* SSL_CLIENT_S_DN_STRING = "SSL_CLIENT_S_DN";
+/* Apache environment variable. This is used to get the DN used for authorizing.
+ * In principle any variable could be used. */
+static const char* CLIENT_S_DN_STRING = "SSL_CLIENT_S_DN";
+/* Apache environment variable. If this is non-empty and set, everything beyond its value
+ * is stripped off the DN. If e.g. a client authenticates with
+ * /O=Grid/O=NorduGrid/OU=nbi.dk/CN=Frederik Orellana/CN=65829253
+ * the DN used for authorization is 
+ * /O=Grid/O=NorduGrid/OU=nbi.dk/CN=Frederik Orellana
+ * All this is to support proxy certificates.*/
+static const char* CLIENT_S_DN_CN_STRING = "SSL_CLIENT_S_DN_CN";
 
 /* This is used for logging by mod_gridsite_log_func */
 static server_rec* this_server = NULL;
@@ -370,8 +389,8 @@ static void mod_gridsite_log_func(char *file, int line, int level,
   path2 = (char*)apr_pcalloc(r->pool, buf_size);
  	while(1){
     int i;
-    size = readlink (path2, path, buf_size - 1);
-    if (size == -1) {
+    size = readlink(path2, path, buf_size - 1);
+    if(size == -1){
 	    break;
     }
     /* readlink() success. */
@@ -665,6 +684,36 @@ check_user_id(request_rec *r)
 }
 
 /**
+ * Strip cn=xxxxxxxx off the DN.
+ */
+ 
+ const char* strip_off_proxy_cn(request_rec *r, const char* client_dn, const char* client_cn)
+{
+  if(client_cn != NULL && strlen(client_cn) > 0){
+	  /* client_cn is Frederik Orellana
+	   * short_cn is /CN=Frederik Orellana
+	   * full_cn is  /CN=Frederik Orellana/CN=65829253 */
+ 	  char* short_cn = (char*)apr_pcalloc(r->pool, sizeof(char*) * 256);
+ 	  char* full_cn = (char*)apr_pcalloc(r->pool, sizeof(char*) * 256);
+ 	  char* before_cn = (char*)apr_pcalloc(r->pool, sizeof(char*) * 256);
+ 	  short_cn = apr_pstrcat(r->pool, "/CN=", client_cn, NULL);
+    full_cn = strstr(client_dn, short_cn);
+    // Perhaps cn is lower case...
+    if(full_cn == NULL){
+     	short_cn = apr_pstrcat(r->pool, "/cn=", client_cn, NULL);
+      full_cn = strstr(client_dn, short_cn);
+    }
+    if(full_cn != NULL && strlen(full_cn) > 0){
+      apr_cpystrn(before_cn, client_dn, strlen(client_dn) - strlen(full_cn) + 1);
+      const char* stripped_client_dn = apr_pstrcat(r->pool, before_cn, short_cn, NULL);
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "client DN stripped to '%s'", stripped_client_dn);
+      return stripped_client_dn;
+    }
+  }
+  return client_dn;
+}
+
+/**
  * Authorization
  */
 
@@ -673,6 +722,7 @@ check_auth(request_rec *r)
 {	
   config_rec* conf;
   const char* client_dn;
+  const char* client_cn;
   int gacl_file1_ok, gacl_file2_ok;
   GRSTgaclAcl   *acl1, *acl2;
   GRSTgaclPerm   perm0, perm1, perm2;
@@ -720,14 +770,19 @@ check_auth(request_rec *r)
   /* Create a sub request. */
   subreq = ap_sub_req_lookup_file("/dev/null", r, 0);
   
-  /* Read the X.509 subject variable */
+  /* Read the X.509 DN variable */
   //client_dn =  "/O=Grid/O=NorduGrid/OU=nbi.dk/CN=Frederik Orellana";
-  client_dn = apr_table_get(subreq->subprocess_env, SSL_CLIENT_S_DN_STRING);
+  client_dn = apr_table_get(subreq->subprocess_env, CLIENT_S_DN_STRING);
+	if(CLIENT_S_DN_CN_STRING != NULL && strlen(CLIENT_S_DN_CN_STRING) > 0){
+		client_dn = apr_table_get(subreq->subprocess_env, CLIENT_S_DN_STRING);
+    client_cn = apr_table_get(subreq->subprocess_env, CLIENT_S_DN_CN_STRING);
+    client_dn = strip_off_proxy_cn(r, client_dn, client_cn);
+   }
   //dump_request(subreq);
   ap_destroy_sub_req(subreq);
   
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "client DN '%s'",client_dn);
-  if (client_dn == NULL){
+  if(client_dn == NULL){
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "unauthorized: client DN '%s'",client_dn);
     return HTTP_UNAUTHORIZED;
   }
