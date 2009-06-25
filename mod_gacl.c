@@ -521,26 +521,22 @@ static void find_gacl_file(request_rec* r, char* pwd){
     
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current dir: %s", pwd);
     
-    if (gacl_file1_ok < 0){
-      gacl_file1_ok = open(gacl_file, oflag);
-      if (gacl_file1_ok >= 0){
-        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL1 from: '%s'", gacl_file);
-        //acl1 = GRSTgaclAclLoadFile((char*)gacl_file);
-        close(gacl_file1_ok);
+    if (gacl_file1_ok != 0){
+      gacl_file1_ok = access(gacl_file, F_OK);
+      if (gacl_file1_ok == 0){
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found .gacl file: '%s'", gacl_file);
       }
     }
-    if (gacl_file2_ok < 0){
-      gacl_file2_ok = open(gacl_vo_file, oflag);
-      if (gacl_file2_ok >= 0){
-        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL2 from: '%s'", gacl_vo_file);
-        //acl2 = GRSTgaclAclLoadFile((char*)gacl_vo_file);
-        close(gacl_file2_ok);
+    if (gacl_file2_ok != 0){
+      gacl_file2_ok = access(gacl_vo_file, F_OK);
+      if (gacl_file2_ok == 0){
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found .gacl_vo file: '%s'", gacl_vo_file);
       }
     }
 
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found gacl files: %i %i", gacl_file1_ok, gacl_file2_ok);
     
-    if(gacl_file1_ok >= 0 ||
+    if(gacl_file1_ok == 0 ||
        (GACL_ROOT == NULL && check_paths(pwd, DOCUMENT_ROOT) == 0) ||
        (GACL_ROOT != NULL && check_paths(pwd, GACL_ROOT) == 0) ||
        strcmp(pwd, "/") == 0){
@@ -716,6 +712,39 @@ check_user_id(request_rec *r)
 /**
  * Authorization
  */
+ 
+/**
+ * Load ACL from file
+ */
+GRSTgaclAcl*
+load_acl(request_rec *r, char* gacl_file)
+{
+	GRSTgaclAcl* acl;
+	acl = NULL;
+ 	int gacl_file_ok = access(gacl_file, F_OK);
+ 	int i;
+  if (gacl_file_ok == 0) {
+  	// If the file is there, try 5 times to access the GACL file for reading - wait 3 seconds between each.
+  	// After that, give up.
+  	// We do this in case another process is juse writing or modifying the GACL file.
+  	for (i = 0; i <= 5; i++) {
+  		gacl_file_ok = access(gacl_file, R_OK);
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL from: '%s'", gacl_file);
+      acl = GRSTgaclAclLoadFile(gacl_file);
+      if(!gacl_file_ok || acl != NULL){
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "first DN from ACL: '%s'", acl->firstentry->firstcred->auri);
+        break;
+      }
+      if(i == 5){
+  	    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "could not access '%s/%s' - giving up", getcwd(NULL, 0), gacl_file);
+        break;
+      }
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "waiting for '%s/%s' to be accessible - %i ...", getcwd(NULL, 0), gacl_file, i);
+      sleep(3);
+    }
+  }
+  return acl;
+}
 
 static int
 check_auth(request_rec *r)
@@ -744,6 +773,11 @@ check_auth(request_rec *r)
 
   if (r->method_number == M_PROPFIND)
     perm0 = GRST_PERM_LIST;
+    
+  if(apr_strnatcasecmp(r->filename, gacl_file) == 0 ||
+     apr_strnatcasecmp(r->filename, gacl_vo_file) == 0){
+			perm0 = GRST_PERM_ADMIN;
+		}
 
   /* Find the path of the file/directory to check. */  
   if (GACL_ROOT == NULL) {
@@ -800,40 +834,22 @@ check_auth(request_rec *r)
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "chdir() to '%s'", pwd);
   if (chdir(pwd) < 0){
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "chdir() to '%s' failed", pwd);
-  }
+  }  
   
   GRSTgaclInit();
   
-  /* Load the ACLs off the disk. */
+  /* Recurse upwards until .gacl file is found. */
   pwd = (char*) getcwd(NULL, 0);
-  
   find_gacl_file(r, pwd);
   
-  /* Recurse upwards until .gacl and .gacl_vo files are found. */
-  gacl_file1_ok = -1;
-  gacl_file2_ok = -1;
-  acl1 = NULL;
-  acl2 = NULL;
-  
   /* Load the ACLs. */
-  gacl_file1_ok = open(gacl_file, oflag);
-  if (gacl_file1_ok >= 0){
-    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL1 from: '%s'", gacl_file);
-    acl1 = GRSTgaclAclLoadFile((char*)gacl_file);
-    close(gacl_file1_ok);
-  }
-  gacl_file2_ok = open(gacl_vo_file, oflag);
-  if (gacl_file2_ok >= 0){
-    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL2 from: '%s'", gacl_vo_file);
-    acl2 = GRSTgaclAclLoadFile((char*)gacl_vo_file);
-    close(gacl_file2_ok);
-  }
+  acl1 = load_acl(r, (char*)gacl_file);
+  acl2 = load_acl(r, (char*)gacl_vo_file);
 
+  /* If gacl file(s) were found, check permissions, otherwise carry on and stick with defaults. */
   perm1 = DEFAULT_PERM;
-  perm2 = DEFAULT_PERM;
-  
-  /* If no gacl files were found, carry on and stick with the defaults. */
-  if (gacl_file1_ok >= 0 || gacl_file2_ok >= 0) {
+  perm2 = DEFAULT_PERM; 
+  if (acl1 != NULL || acl2 != NULL) {
     
     /* Find the permissions of the user in this directory. */
     usercred = GRSTgaclCredNew("person");
@@ -841,11 +857,9 @@ check_auth(request_rec *r)
     user = GRSTgaclUserNew(usercred);
     
     if (acl1 != NULL){
-      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "First DN from ACL1: '%s'",acl1->firstentry->firstcred->auri);
       perm1 = GRSTgaclAclTestUser(acl1, user);
     }      
     if (acl2 != NULL){
-      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "First DN from ACL2: '%s'",acl2->firstentry->firstcred->auri);
       perm2 = GRSTgaclAclTestUser(acl2, user);
     }
     
