@@ -197,8 +197,12 @@ static char* DOCUMENT_ROOT = NULL;
 /* Maximum of parent directories to check for .gacl files */
 static unsigned int MAX_RECURSE = 10;
 
-/* File open flag */
-static int oflag = O_RDONLY;
+/* Number of attempts to parse a GACL file - failures will usually be due to
+ * another apache process parsing the same GACL file at the same time */
+static unsigned int GACL_PARSE_ATTEMPTS = 12;
+
+/* Number of seconds between each parse attempt */
+static unsigned int GACL_PARSE_INTERVAL = 10;
 
 static AP_DECLARE_DATA ap_filter_rec_t* null_input_filter_handle = 0;
 static AP_DECLARE_DATA ap_filter_rec_t* null_output_filter_handle = 0;
@@ -433,7 +437,7 @@ char* get_path(request_rec *r, char* req_fil)
   }     
 
   /* Check if req_fil exists and is a directory. */
-  if((access(req_fil, oflag)) == 0){
+  if((access(req_fil, F_OK)) == 0){
 		serr = stat(req_fil, &sbuf);
 		if (!serr){
 		  if(S_ISDIR(sbuf.st_mode)){
@@ -630,7 +634,7 @@ check_user_id(request_rec *r)
   }
   
   /* Continue only if the requested file actually exists. */
-  if(r->method_number == M_GET && access(check_file_path, oflag) < 0){
+  if(r->method_number == M_GET && access(check_file_path, F_OK) < 0){
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "File does not exist: %s.", check_file_path);
     return OK;
   }
@@ -714,7 +718,7 @@ check_user_id(request_rec *r)
  */
  
 /**
- * Load ACL from file
+ * Load ACL from file. GACL_CACHE_SIZE GACL files are cached for GACL_TIMEOUT seconds.
  */
 GRSTgaclAcl*
 load_acl(request_rec *r, char* gacl_file)
@@ -724,23 +728,27 @@ load_acl(request_rec *r, char* gacl_file)
  	int gacl_file_ok = access(gacl_file, F_OK);
  	int i;
   if (gacl_file_ok == 0) {
-  	// If the file is there, try 5 times to access the GACL file for reading - wait 3 seconds between each.
+  	// TODO: implement caching
+  	
+  	// If the file is there, try GACL_PARSE_ATTEMPTS times to access the GACL file for reading - wait GACL_PARSE_INTERVAL seconds between each.
   	// After that, give up.
-  	// We do this in case another process is juse writing or modifying the GACL file.
-  	for (i = 0; i <= 5; i++) {
+  	// We do this in case another process is just writing or modifying the GACL file.
+  	for (i = 0; i < GACL_PARSE_ATTEMPTS; i++) {
   		gacl_file_ok = access(gacl_file, R_OK);
       ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL from: '%s'", gacl_file);
-      acl = GRSTgaclAclLoadFile(gacl_file);
-      if(!gacl_file_ok || acl != NULL){
-        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "first DN from ACL: '%s'", acl->firstentry->firstcred->auri);
-        break;
+      if(gacl_file_ok == 0){
+        acl = GRSTgaclAclLoadFile(gacl_file);
+        if(acl != NULL){
+          ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "first DN from ACL: '%s'", acl->firstentry->firstcred->auri);
+          break;
+        }
       }
-      if(i == 5){
+      if(i == GACL_PARSE_ATTEMPTS - 1){
   	    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "could not access '%s/%s' - giving up", getcwd(NULL, 0), gacl_file);
         break;
       }
       ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "waiting for '%s/%s' to be accessible - %i ...", getcwd(NULL, 0), gacl_file, i);
-      sleep(3);
+      sleep(GACL_PARSE_INTERVAL);
     }
   }
   return acl;
@@ -788,7 +796,7 @@ check_auth(request_rec *r)
   }
   
   /* Continue only if the requested file actually exists. */
-  if(r->method_number == M_GET && access(check_file_path, oflag) < 0){
+  if(r->method_number == M_GET && access(check_file_path, F_OK) < 0){
     if(((DEFAULT_PERM & perm0 ) != 0)){
       ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
       return OK;
