@@ -204,6 +204,13 @@ static unsigned int GACL_PARSE_ATTEMPTS = 12;
 /* Number of seconds between each parse attempt */
 static unsigned int GACL_PARSE_INTERVAL = 10;
 
+/* Number of ACLs cached in memory */
+static unsigned int GACL_CACHE_SIZE = 20;
+
+/* Number of times this module is executed before the ACL cache is flushed
+ * (this is to avoid leaking memory) */
+static unsigned int MAX_COUNT = 200;
+
 static AP_DECLARE_DATA ap_filter_rec_t* null_input_filter_handle = 0;
 static AP_DECLARE_DATA ap_filter_rec_t* null_output_filter_handle = 0;
 
@@ -212,20 +219,98 @@ static AP_DECLARE_DATA ap_filter_rec_t* null_output_filter_handle = 0;
  */
 
 typedef struct {
+	apr_array_header_t* acl_array_;
+	apr_array_header_t* file_array_;
+	apr_array_header_t* date_array_;
+} acl_cache;
+
+typedef struct {
   char* path_;
   char* perm_;
   char* root_;
   int timeout_;
+  int count_;
+  apr_pool_t* pool_;
+  acl_cache* acl_cache_;
+#if APR_HAS_THREADS
+  apr_thread_mutex_t* mutex_;
+#endif
 } config_rec;
+
+static acl_cache*
+make_acl_cache(apr_pool_t* p)
+{
+	acl_cache* cache;
+	cache->acl_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(GRSTgaclAcl*));
+	cache->file_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(const char*));
+	cache->date_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(time_t*));
+	return cache;
+}
+
+static apr_status_t do_garbage(config_rec* conf)
+{
+  if (conf->count_++ >= MAX_COUNT) {
+   /* Just clean up everything, including the hash and its contents
+    * along with whatever may have leaked.
+    */
+    apr_pool_clear(conf->pool_);
+    /* Re-initialize the cache and counter */
+    conf->acl_cache_ = make_acl_cache(conf->pool_);
+    conf->count_ = 0;
+	}
+  /* All done successfully */
+  return APR_SUCCESS;
+}
+
+static void create_module_conf(apr_pool_t *pchild, server_rec *s)
+{
+	apr_status_t rv;
+  config_rec* module_conf = (config_rec*)apr_pcalloc(pchild, sizeof(config_rec));
+
+  /* Derive our own pool from pchild */
+  rv = apr_pool_create(&module_conf->pool_, pchild);
+  if (rv != APR_SUCCESS) {
+    ap_log_perror(APLOG_MARK, APLOG_CRIT, rv, pchild, "Failed to create subpool for gacl_module");
+    return;
+  }
+  	
+  /* Set up a thread mutex for when we need to manipulate the cache */
+#if APR_HAS_THREADS
+  rv = apr_thread_mutex_create(&module_conf->mutex_, APR_THREAD_MUTEX_DEFAULT, pchild);
+  if (rv != APR_SUCCESS) {
+    ap_log_perror(APLOG_MARK, APLOG_CRIT, rv, pchild, "Failed to create mutex for gacl_module");
+    return;
+  }
+#endif
+	
+	/* Create the cache itself */
+  module_conf->acl_cache_ = make_acl_cache(module_conf->pool_);
+  
+  ap_set_module_config(s->module_config, &gacl_module, module_conf);
+	
+}
+	
+static void my_child_init(apr_pool_t *pchild, server_rec *s)
+{
+  /* Get the config vector. Construct a new one if it is not set */
+  config_rec* module_conf = (config_rec*)ap_get_module_config(s->module_config, &gacl_module);
+  if(module_conf == NULL){
+  	ap_log_perror(MY_MARK, APLOG_INFO, 0, pchild, "Creating new module conf for gacl_module");
+  	create_module_conf(pchild, s);
+  	module_conf = (config_rec*)ap_get_module_config(s->module_config, &gacl_module);
+  }
+}
 
 static void*
 dir_config(apr_pool_t* p, char* d)
-{
+{	
   config_rec* conf = (config_rec*)apr_pcalloc(p, sizeof(config_rec));
+
   conf->path_ = 0;			/* null pointer */
   conf->perm_ = 0;			/* null pointer */
   conf->root_ = 0;			/* null pointer */
   conf->timeout_ = -1;
+  
   return conf;
 }
 
@@ -564,10 +649,19 @@ static void find_gacl_file(request_rec* r, char* pwd){
 
 }
 
+/* Get the module config. */
+static config_rec* get_module_conf(){
+	config_rec* module_conf = (config_rec*)ap_get_module_config(this_server->module_config, &gacl_module);
+	if(module_conf == NULL){
+    my_child_init(this_server->process->pool, this_server);
+	  module_conf = (config_rec*)ap_get_module_config(this_server->module_config, &gacl_module);
+	}
+	return module_conf;
+}
+
 /** 
  * Set constants from config file, check if module enabled and sync with dn-list-url.
  */
-
 static int
 check_user_id(request_rec *r)
 {
@@ -584,12 +678,13 @@ check_user_id(request_rec *r)
     return DECLINED;    
   } 
 
-
-  if(this_server == NULL)
+  if(this_server == NULL){
     this_server = r->server;
+  }
     
-  if (DOCUMENT_ROOT == NULL)
+  if (DOCUMENT_ROOT == NULL){
     DOCUMENT_ROOT = (char*) ap_document_root(r);
+  }
 
   /* Check if there is a request loop. */
   /*for (subreq = r->main; subreq != 0; subreq = subreq->main) {
@@ -598,8 +693,15 @@ check_user_id(request_rec *r)
       return DECLINED;
     }
   }*/
+  
+	/* Garbage collect ACL cache. */
+	config_rec* module_conf = get_module_conf();
+  apr_status_t rv = do_garbage(module_conf);
+  if(rv != APR_SUCCESS) {
+		ap_log_perror(MY_MARK, APLOG_ERR, rv, r->pool, "Failed to garbage collect for gacl_module");
+	};
 
-  /* Get config. */
+  /* Get directory config. */
   conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   
   /* Check if not configured to use this module; thanks to mrueegg AT sf. */
@@ -717,40 +819,208 @@ check_user_id(request_rec *r)
  * Authorization
  */
  
+ /**
+  * If a GACL file is cached, return the index of it, otherwise return -1.
+  */
+ int
+ acl_cache_check(request_rec *r, char* gacl_file)
+{
+  char* gacl_file_path;
+  gacl_file_path = gacl_file;
+  char* pwd = (char*) getcwd(NULL, 0);
+  if(gacl_file[0] != '/'){
+  	gacl_file_path = apr_pstrcat(r->pool, pwd, "/", gacl_file, NULL);
+  }
+	int i;
+	config_rec* module_conf = get_module_conf();
+	for(i = 0; i<module_conf->acl_cache_->acl_array_->nelts; i++){
+		char* cached_file = ((char**)module_conf->acl_cache_->file_array_->elts)[i];
+		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "checking cache entry %i: '%s' <-->'%s'",
+		   i, cached_file, gacl_file_path);
+		if(apr_strnatcmp(cached_file, gacl_file_path) == 0){
+			return i;
+		}
+	}
+	return -1;
+}
+
+ /**
+ * Load ACL from memory.
+ */
+ GRSTgaclAcl*
+ acl_cache_get(request_rec *r, int i)
+{
+	config_rec* module_conf = get_module_conf();
+	GRSTgaclAcl* acl = ((GRSTgaclAcl**)module_conf->acl_cache_->acl_array_->elts)[i];
+	return acl;
+}
+
 /**
- * Load ACL from file. GACL_CACHE_SIZE GACL files are cached for GACL_TIMEOUT seconds.
+ * Load ACL from file.
+ * Notice that GACL_CACHE_SIZE GACL files are cached in memory.
+ */
+GRSTgaclAcl*
+parse_gacl_file(request_rec *r, char* gacl_file)
+{
+	int gacl_file_ok;
+  int i;
+  GRSTgaclAcl* acl = NULL;
+ // Try GACL_PARSE_ATTEMPTS times to access the GACL file for reading - wait GACL_PARSE_INTERVAL seconds between each.
+ // After that, give up.
+ // We do this in case another process is just writing or modifying the GACL file.
+ for (i = 0; i < GACL_PARSE_ATTEMPTS; i++) {
+ 	gacl_file_ok = access(gacl_file, R_OK);
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL from: '%s'", gacl_file);
+    if(gacl_file_ok == 0){
+      acl = GRSTgaclAclLoadFile(gacl_file);
+      if(acl != NULL){
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "first DN from ACL: '%s'", acl->firstentry->firstcred->auri);
+        break;
+      }
+    }
+    if(i == GACL_PARSE_ATTEMPTS - 1){
+      ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "could not access '%s/%s' - giving up", getcwd(NULL, 0), gacl_file);
+      break;
+    }
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "waiting for '%s/%s' to be accessible - %i ...", getcwd(NULL, 0), gacl_file, i);
+    sleep(GACL_PARSE_INTERVAL);
+  }
+  return acl;
+}
+
+/**
+ * Save GACL object for later use.
+ */
+ void
+acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int i)
+{
+  config_rec* conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
+  config_rec* module_conf = get_module_conf();
+  
+  struct stat attrib;
+  apr_status_t rv;
+  char* pwd = (char*) getcwd(NULL, 0);
+  
+  GRSTgaclAcl* acl;
+  time_t last_modified_time;
+  const char* gacl_file_path;
+
+  GRSTgaclAcl** acl_ptr;
+  time_t** time_ptr;
+  const char** file_ptr;
+
+  acl = up_acl;
+  gacl_file_path = gacl_file;
+  if(gacl_file[0] != '/'){
+  	gacl_file_path = apr_pstrcat(r->pool, pwd, "/", gacl_file, NULL);
+  }
+  
+  if(stat(gacl_file_path, &attrib) < 0){
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "GACL file not there: %s", gacl_file_path);
+  	return;
+  }
+  
+  last_modified_time = attrib.st_mtime;
+  ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "modification time of GACL file %s: %d, index: %i",
+     gacl_file_path, (int) last_modified_time, i);
+  
+
+#if APR_HAS_THREADS
+  // In the threaded case, we need to acquire a lock on the cache
+  // - if we cannot, we don't try and write to it.
+  rv = apr_thread_mutex_lock(module_conf->mutex_);
+  if (rv != APR_SUCCESS) {
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, rv, r, "failed to acquire thread mutex");
+    return;
+  }
+#endif
+
+	if(i >= 0){
+		
+		time_t cached_time = *((time_t**)module_conf->acl_cache_->date_array_->elts)[i];
+		
+	  if(cached_time != last_modified_time){
+	    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r,
+	      "updating cached ACL for file '%s' with old modification time '%i'and new '%i'",
+	       gacl_file_path, (int)*((time_t**)module_conf->acl_cache_->date_array_->elts)[i],
+	       last_modified_time);
+	       
+	    // load from file
+  		acl = parse_gacl_file(r, gacl_file);
+	       
+	    // Store values
+	    ((time_t**)module_conf->acl_cache_->date_array_->elts)[i] =
+	       apr_pmemdup(module_conf->pool_, &last_modified_time, sizeof(time_t));
+
+	    ((GRSTgaclAcl**)module_conf->acl_cache_->acl_array_->elts)[i] =
+	       apr_pmemdup(module_conf->pool_, acl, sizeof(GRSTgaclAcl));
+	  }
+	}
+	else{
+		// If the arrays are full, remove last entry from each
+		if(module_conf->acl_cache_->file_array_->nelts == GACL_CACHE_SIZE){
+	  	apr_array_pop(module_conf->acl_cache_->acl_array_);
+		  apr_array_pop(module_conf->acl_cache_->date_array_);
+		  apr_array_pop(module_conf->acl_cache_->file_array_);
+		}
+		// Store values
+		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "caching new ACL for file '%s'", gacl_file_path);
+		
+		acl_ptr = (GRSTgaclAcl**)apr_array_push(module_conf->acl_cache_->acl_array_);	
+		*acl_ptr = apr_pmemdup(module_conf->pool_, acl, sizeof(GRSTgaclAcl));
+		
+		time_ptr = (time_t**)apr_array_push(module_conf->acl_cache_->date_array_);
+		*time_ptr = apr_pmemdup(module_conf->pool_, &last_modified_time, sizeof(time_t));
+		
+		file_ptr = (const char**)apr_array_push(module_conf->acl_cache_->file_array_);
+		*file_ptr = apr_pstrdup(module_conf->pool_, gacl_file_path);
+		
+		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "cached new ACL for file '%s' with date: '%i'",
+	     ((const char**)(module_conf->acl_cache_->file_array_->elts))[module_conf->acl_cache_->file_array_->nelts-1],
+	     (int)*((time_t**)module_conf->acl_cache_->date_array_->elts)[module_conf->acl_cache_->file_array_->nelts-1]);
+	  int i;
+    for (i = 0; i < module_conf->acl_cache_->file_array_->nelts; i++) {
+      const char *s = ((const char**)module_conf->acl_cache_->file_array_->elts)[i];
+      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "%d: %s", i, s);
+    }
+	
+	}
+	
+#if APR_HAS_THREADS
+  // release the lock
+  rv = apr_thread_mutex_unlock(module_conf->mutex_);
+  if (rv != APR_SUCCESS) {
+  // Something is seriously wrong.  We need to log it, but it doesn't - of itself - invalidate this request.
+    ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r, "Failed to release thread mutex");
+  }
+#endif
+
+}
+
+/**
+ * Load ACL.
  */
 GRSTgaclAcl*
 load_acl(request_rec *r, char* gacl_file)
 {
-	GRSTgaclAcl* acl;
-	acl = NULL;
+	GRSTgaclAcl* acl = NULL;
+	int gacl_cache_index = -1;
  	int gacl_file_ok = access(gacl_file, F_OK);
  	int i;
   if (gacl_file_ok == 0) {
-  	// TODO: implement caching
-  	
-  	// If the file is there, try GACL_PARSE_ATTEMPTS times to access the GACL file for reading - wait GACL_PARSE_INTERVAL seconds between each.
-  	// After that, give up.
-  	// We do this in case another process is just writing or modifying the GACL file.
-  	for (i = 0; i < GACL_PARSE_ATTEMPTS; i++) {
-  		gacl_file_ok = access(gacl_file, R_OK);
-      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL from: '%s'", gacl_file);
-      if(gacl_file_ok == 0){
-        acl = GRSTgaclAclLoadFile(gacl_file);
-        if(acl != NULL){
-          ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "first DN from ACL: '%s'", acl->firstentry->firstcred->auri);
-          break;
-        }
-      }
-      if(i == GACL_PARSE_ATTEMPTS - 1){
-  	    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "could not access '%s/%s' - giving up", getcwd(NULL, 0), gacl_file);
-        break;
-      }
-      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "waiting for '%s/%s' to be accessible - %i ...", getcwd(NULL, 0), gacl_file, i);
-      sleep(GACL_PARSE_INTERVAL);
-    }
+  	// Check cache
+  	gacl_cache_index = acl_cache_check(r, gacl_file);
+  	if(gacl_cache_index >= 0){
+  		// load from cache
+  		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "using cached ACL with index '%i'", gacl_cache_index);
+  		acl = acl_cache_get(r, gacl_cache_index);
+  	}
+  	else{
+  	  // load from file
+  		acl = parse_gacl_file(r, gacl_file);
+  	}
   }
+  acl_cache_update(r, gacl_file, acl, gacl_cache_index);
   return acl;
 }
 
@@ -782,8 +1052,8 @@ check_auth(request_rec *r)
   if (r->method_number == M_PROPFIND)
     perm0 = GRST_PERM_LIST;
     
-  if(apr_strnatcasecmp(r->filename, gacl_file) == 0 ||
-     apr_strnatcasecmp(r->filename, gacl_vo_file) == 0){
+  if(apr_strnatcmp(r->filename, gacl_file) == 0 ||
+     apr_strnatcmp(r->filename, gacl_vo_file) == 0){
 			perm0 = GRST_PERM_ADMIN;
 		}
 
@@ -908,8 +1178,10 @@ check_auth(request_rec *r)
 
 static void
 register_hooks(apr_pool_t* p) {
+	
+	ap_hook_child_init(my_child_init, 0, 0, APR_HOOK_FIRST);
 		
-  ap_hook_check_user_id(check_user_id, 0, 0,APR_HOOK_FIRST);
+  ap_hook_check_user_id(check_user_id, 0, 0, APR_HOOK_FIRST);
   ap_hook_auth_checker(check_auth, 0, 0, APR_HOOK_FIRST);
 
   if (null_input_filter_handle == 0) {
