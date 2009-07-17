@@ -199,17 +199,17 @@ static unsigned int MAX_RECURSE = 10;
 
 /* Number of attempts to parse a GACL file - failures will usually be due to
  * another apache process parsing the same GACL file at the same time */
-static unsigned int GACL_PARSE_ATTEMPTS = 12;
+static unsigned int GACL_PARSE_ATTEMPTS = 30;
 
 /* Number of seconds between each parse attempt */
 static unsigned int GACL_PARSE_INTERVAL = 10;
 
 /* Number of ACLs cached in memory */
-static unsigned int GACL_CACHE_SIZE = 20;
+static unsigned int GACL_CACHE_SIZE = 500;
 
 /* Number of times this module is executed before the ACL cache is flushed
  * (this is to avoid leaking memory) */
-static unsigned int MAX_COUNT = 200;
+static unsigned int MAX_COUNT = 10000;
 
 static AP_DECLARE_DATA ap_filter_rec_t* null_input_filter_handle = 0;
 static AP_DECLARE_DATA ap_filter_rec_t* null_output_filter_handle = 0;
