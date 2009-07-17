@@ -207,6 +207,10 @@ static unsigned int GACL_PARSE_INTERVAL = 10;
 /* Number of ACLs cached in memory */
 static unsigned int GACL_CACHE_SIZE = 500;
 
+/** Keep top-level GACL files cached */
+static char** GACL_KEEP_IN_CACHE;
+static unsigned int GACL_KEEP_IN_CACHE_SIZE = 2;
+
 /* Number of times this module is executed before the ACL cache is flushed
  * (this is to avoid leaking memory) */
 static unsigned int MAX_COUNT = 10000;
@@ -240,6 +244,16 @@ typedef struct {
 static acl_cache*
 make_acl_cache(apr_pool_t* p)
 {
+  GACL_KEEP_IN_CACHE = (char**)apr_pcalloc(p, GACL_KEEP_IN_CACHE_SIZE * sizeof (char*));
+  if(GACL_ROOT != NULL){
+    GACL_KEEP_IN_CACHE[0] = apr_pstrcat(p, GACL_ROOT, "/", gacl_file, NULL);
+    GACL_KEEP_IN_CACHE[1] = apr_pstrcat(p, GACL_ROOT, "/", gacl_vo_file, NULL);
+  }
+  else{
+    GACL_KEEP_IN_CACHE[0] = apr_pstrcat(p, DOCUMENT_ROOT, "/", gacl_file, NULL);
+    GACL_KEEP_IN_CACHE[1] = apr_pstrcat(p, DOCUMENT_ROOT, "/", gacl_vo_file, NULL);
+  }
+  
 	acl_cache* cache;
 	cache->acl_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(GRSTgaclAcl*));
 	cache->file_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(const char*));
@@ -889,9 +903,48 @@ parse_gacl_file(request_rec *r, char* gacl_file)
 }
 
 /**
+ * If the last element is one to keep, cycle cache arrays.
+ */
+void
+cycle_cache_arrays(){
+  
+  int i;
+  config_rec* module_conf = get_module_conf();
+  
+  for (i = 0; i < GACL_KEEP_IN_CACHE_SIZE; i++) {
+    if(apr_strnatcmp(((char**)module_conf->acl_cache_->file_array_->elts)[i],
+       GACL_KEEP_IN_CACHE[i]) == 0){
+        
+      ((char**)module_conf->acl_cache_->file_array_->elts)[i] =
+         apr_pstrdup(
+            module_conf->pool_,
+            apr_array_pop(module_conf->acl_cache_->file_array_)
+         );
+        
+      ((time_t**)module_conf->acl_cache_->date_array_->elts)[i] =
+         apr_pmemdup(
+            module_conf->pool_,
+            apr_array_pop(module_conf->acl_cache_->date_array_),
+            sizeof(time_t)
+         );
+
+      ((GRSTgaclAcl**)module_conf->acl_cache_->acl_array_->elts)[i] =
+         apr_pmemdup(
+            module_conf->pool_,
+            apr_array_pop(module_conf->acl_cache_->acl_array_),
+            sizeof(GRSTgaclAcl)
+         );
+         
+      return;
+      
+    }
+  }
+}
+
+/**
  * Save GACL object for later use.
  */
- void
+void
 acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int i)
 {
   config_rec* conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
@@ -959,6 +1012,8 @@ acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int i)
 	else{
 		// If the arrays are full, remove last entry from each
 		if(module_conf->acl_cache_->file_array_->nelts == GACL_CACHE_SIZE){
+      // If the last element is one that should be kept, cycle it up before popping
+      cycle_cache_arrays();
 	  	apr_array_pop(module_conf->acl_cache_->acl_array_);
 		  apr_array_pop(module_conf->acl_cache_->date_array_);
 		  apr_array_pop(module_conf->acl_cache_->file_array_);
