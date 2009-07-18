@@ -165,6 +165,10 @@ static const char* myname = "mod_gacl";
 static const char* gacl_file = ".gacl";
 static const char* gacl_vo_file = ".gacl_vo";
 
+/* GACL files that are 'hot', i.e. that are to be kept in the ACL memory-cache */
+static const char* top_gacl_file = "gridfactory/.gacl";
+static const char* top_gacl_vo_file = "gridfactory/.gacl_vo";
+
 /* Apache environment variable. This is used to get the DN used for authorizing.
  * In principle any variable could be used. */
 static const char* CLIENT_S_DN_STRING = "SSL_CLIENT_S_DN";
@@ -205,11 +209,7 @@ static unsigned int GACL_PARSE_ATTEMPTS = 30;
 static unsigned int GACL_PARSE_INTERVAL = 10;
 
 /* Number of ACLs cached in memory */
-static unsigned int GACL_CACHE_SIZE = 500;
-
-/** Keep top-level GACL files cached */
-static char** GACL_KEEP_IN_CACHE;
-static unsigned int GACL_KEEP_IN_CACHE_SIZE = 2;
+static unsigned int GACL_CACHE_SIZE = 3;
 
 /* Number of times this module is executed before the ACL cache is flushed
  * (this is to avoid leaking memory) */
@@ -243,17 +243,7 @@ typedef struct {
 
 static acl_cache*
 make_acl_cache(apr_pool_t* p)
-{
-  GACL_KEEP_IN_CACHE = (char**)apr_pcalloc(p, GACL_KEEP_IN_CACHE_SIZE * sizeof (char*));
-  if(GACL_ROOT != NULL){
-    GACL_KEEP_IN_CACHE[0] = apr_pstrcat(p, GACL_ROOT, "/", gacl_file, NULL);
-    GACL_KEEP_IN_CACHE[1] = apr_pstrcat(p, GACL_ROOT, "/", gacl_vo_file, NULL);
-  }
-  else{
-    GACL_KEEP_IN_CACHE[0] = apr_pstrcat(p, DOCUMENT_ROOT, "/", gacl_file, NULL);
-    GACL_KEEP_IN_CACHE[1] = apr_pstrcat(p, DOCUMENT_ROOT, "/", gacl_vo_file, NULL);
-  }
-  
+{  
 	acl_cache* cache;
 	cache->acl_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(GRSTgaclAcl*));
 	cache->file_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(const char*));
@@ -905,39 +895,78 @@ parse_gacl_file(request_rec *r, char* gacl_file)
 /**
  * If the last element is one to keep, cycle cache arrays.
  */
+ void
+do_cycle_cache_arrays(request_rec *r){
+	int i;
+	config_rec* module_conf = get_module_conf();
+	int len = module_conf->acl_cache_->file_array_->nelts;
+	const char* file_ptr = ((char**)module_conf->acl_cache_->file_array_->elts)[len-1];
+  time_t* time_ptr = ((time_t**)module_conf->acl_cache_->date_array_->elts)[len-1];
+  GRSTgaclAcl* acl_ptr = ((GRSTgaclAcl**)module_conf->acl_cache_->acl_array_->elts)[len-1];
+	
+	for (i = len-1; i>0; i--) {
+		
+	  ((char**)module_conf->acl_cache_->file_array_->elts)[i] =
+	       apr_pstrdup(module_conf->pool_,
+	       ((char**)module_conf->acl_cache_->file_array_->elts)[i-1]);
+
+	  ((time_t**)module_conf->acl_cache_->date_array_->elts)[i] =
+	       apr_pmemdup(module_conf->pool_,
+	       ((time_t**)module_conf->acl_cache_->date_array_->elts)[i-1],
+	       sizeof(time_t));
+
+	  ((GRSTgaclAcl**)module_conf->acl_cache_->acl_array_->elts)[i] =
+	       apr_pmemdup(module_conf->pool_,
+	       ((GRSTgaclAcl**)module_conf->acl_cache_->acl_array_->elts)[i-1],
+	       sizeof(GRSTgaclAcl));
+	}
+	((char**)module_conf->acl_cache_->file_array_->elts)[0] =
+	       apr_pstrdup(module_conf->pool_,
+	       file_ptr);
+
+	((time_t**)module_conf->acl_cache_->date_array_->elts)[0] =
+	       apr_pmemdup(module_conf->pool_,
+	       time_ptr,
+	       sizeof(time_t));
+
+ ((GRSTgaclAcl**)module_conf->acl_cache_->acl_array_->elts)[0] =
+	       apr_pmemdup(module_conf->pool_,
+	       acl_ptr,
+	       sizeof(GRSTgaclAcl));
+	
+}
+
 void
-cycle_cache_arrays(){
+cycle_cache_arrays(request_rec *r){
   
   int i;
   config_rec* module_conf = get_module_conf();
+  char* top_gacl_paths[2];
+  int cache_len;
   
-  for (i = 0; i < GACL_KEEP_IN_CACHE_SIZE; i++) {
-    if(apr_strnatcmp(((char**)module_conf->acl_cache_->file_array_->elts)[i],
-       GACL_KEEP_IN_CACHE[i]) == 0){
-        
-      ((char**)module_conf->acl_cache_->file_array_->elts)[i] =
-         apr_pstrdup(
-            module_conf->pool_,
-            apr_array_pop(module_conf->acl_cache_->file_array_)
-         );
-        
-      ((time_t**)module_conf->acl_cache_->date_array_->elts)[i] =
-         apr_pmemdup(
-            module_conf->pool_,
-            apr_array_pop(module_conf->acl_cache_->date_array_),
-            sizeof(time_t)
-         );
+  if(GACL_ROOT != NULL){
+    top_gacl_paths[0] = apr_pstrcat(module_conf->pool_, GACL_ROOT, "/", top_gacl_file, NULL);
+    top_gacl_paths[1] = apr_pstrcat(module_conf->pool_, GACL_ROOT, "/", top_gacl_vo_file, NULL);
+  }
+  else{
+    top_gacl_paths[0] = apr_pstrcat(module_conf->pool_, DOCUMENT_ROOT, "/", top_gacl_file, NULL);
+    top_gacl_paths[1] = apr_pstrcat(module_conf->pool_, DOCUMENT_ROOT, "/", top_gacl_vo_file, NULL);
+  }
+  
+  cache_len = module_conf->acl_cache_->file_array_->nelts;
+  
+  for (i = 0; i < sizeof(top_gacl_paths)/sizeof(char*); i++) {
 
-      ((GRSTgaclAcl**)module_conf->acl_cache_->acl_array_->elts)[i] =
-         apr_pmemdup(
-            module_conf->pool_,
-            apr_array_pop(module_conf->acl_cache_->acl_array_),
-            sizeof(GRSTgaclAcl)
-         );
-         
-      return;
-      
+    if(apr_strnatcmp(((char**)module_conf->acl_cache_->file_array_->elts)[cache_len-1],
+       top_gacl_paths[i]) != 0){
+     	continue;
     }
+    
+    do_cycle_cache_arrays(r);
+  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "keeping '%s' in cache --> '%s'",
+  	   ((const char**)(module_conf->acl_cache_->file_array_->elts))[0],
+	     top_gacl_paths[i]);
+    
   }
 }
 
@@ -1013,7 +1042,7 @@ acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int i)
 		// If the arrays are full, remove last entry from each
 		if(module_conf->acl_cache_->file_array_->nelts == GACL_CACHE_SIZE){
       // If the last element is one that should be kept, cycle it up before popping
-      cycle_cache_arrays();
+      cycle_cache_arrays(r);
 	  	apr_array_pop(module_conf->acl_cache_->acl_array_);
 		  apr_array_pop(module_conf->acl_cache_->date_array_);
 		  apr_array_pop(module_conf->acl_cache_->file_array_);
