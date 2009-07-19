@@ -79,6 +79,11 @@
  *      will cause mod_gacl to consult GACLRoot/some/dir/.gacl for permissions.
  *      If not given, ServerRoot/some/dir/.gacl will be consulted.
  * 
+ *   GACLDir  "path"
+ *      Specifies path to directory containing the most accessed .gacl file.
+ *      If specified, the ACL of this file and, if needed, the corresponding
+ *      .gacl_vo file are kept in memory cache.
+ *
  *   VOTimeoutSeconds  "seconds"
  *       Number of seconds to cache dn-lists.
  *
@@ -162,12 +167,8 @@ static const char* myname = "mod_gacl";
 #define MY_MARK myname,0
 
 /* GACL file names */
-static const char* gacl_file = ".gacl";
-static const char* gacl_vo_file = ".gacl_vo";
-
-/* GACL files that are 'hot', i.e. that are to be kept in the ACL memory-cache */
-static const char* top_gacl_file = "gridfactory/.gacl";
-static const char* top_gacl_vo_file = "gridfactory/.gacl_vo";
+static const char* GACL_FILE = ".gacl";
+static const char* GACL_VO_FILE = ".gacl_vo";
 
 /* Apache environment variable. This is used to get the DN used for authorizing.
  * In principle any variable could be used. */
@@ -209,7 +210,7 @@ static unsigned int GACL_PARSE_ATTEMPTS = 30;
 static unsigned int GACL_PARSE_INTERVAL = 10;
 
 /* Number of ACLs cached in memory */
-static unsigned int GACL_CACHE_SIZE = 3;
+static unsigned int GACL_CACHE_SIZE = 200;
 
 /* Number of times this module is executed before the ACL cache is flushed
  * (this is to avoid leaking memory) */
@@ -232,6 +233,7 @@ typedef struct {
   char* path_;
   char* perm_;
   char* root_;
+  char* gacldir_;
   int timeout_;
   int count_;
   apr_pool_t* pool_;
@@ -313,6 +315,7 @@ dir_config(apr_pool_t* p, char* d)
   conf->path_ = 0;			/* null pointer */
   conf->perm_ = 0;			/* null pointer */
   conf->root_ = 0;			/* null pointer */
+  conf->gacldir_ = 0;			/* null pointer */
   conf->timeout_ = -1;
   
   return conf;
@@ -349,6 +352,16 @@ config_root(cmd_parms* cmd, void* mconfig, const char* arg)
 }
 
 static const char*
+config_gacldir(cmd_parms* cmd, void* mconfig, const char* arg)
+{
+  if (((config_rec*)mconfig)->gacldir_)
+    return "GACL dir already set.";
+
+  ((config_rec*)mconfig)->gacldir_ = (char*) arg;
+  return 0;
+}
+
+static const char*
 config_timeout(cmd_parms* cmd, void* mconfig, const char* arg)
 {
   if (((config_rec*)mconfig)->timeout_ > 0)
@@ -368,6 +381,9 @@ static const command_rec command_table[] = {
   AP_INIT_TAKE1(
     "GACLRoot", config_root, NULL, OR_AUTHCFG,
     "Directory root to check for .gacl file."),
+  AP_INIT_TAKE1(
+    "GACLDir", config_gacldir, NULL, OR_AUTHCFG,
+    "Directory with most accessed .gacl file."),
   AP_INIT_TAKE1(
     "VOTimeoutSeconds", config_timeout, NULL, OR_AUTHCFG,
     "Cache timeout for VO lists (dn-lists)."),
@@ -615,15 +631,15 @@ static void find_gacl_file(request_rec* r, char* pwd){
     ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current dir: %s", pwd);
     
     if (gacl_file1_ok != 0){
-      gacl_file1_ok = access(gacl_file, F_OK);
+      gacl_file1_ok = access(GACL_FILE, F_OK);
       if (gacl_file1_ok == 0){
-        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found .gacl file: '%s'", gacl_file);
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found .gacl file: '%s'", GACL_FILE);
       }
     }
     if (gacl_file2_ok != 0){
-      gacl_file2_ok = access(gacl_vo_file, F_OK);
+      gacl_file2_ok = access(GACL_VO_FILE, F_OK);
       if (gacl_file2_ok == 0){
-        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found .gacl_vo file: '%s'", gacl_vo_file);
+        ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "found .gacl_vo file: '%s'", GACL_VO_FILE);
       }
     }
 
@@ -762,7 +778,7 @@ check_user_id(request_rec *r)
   find_gacl_file(r, dir);
   pwd = (char*) getcwd(NULL, 0);
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "Dir: %s.", dir);
-  gacl_vo_file_path = apr_pstrcat(r->pool, pwd, "/"/*dir*/, gacl_vo_file, NULL);
+  gacl_vo_file_path = apr_pstrcat(r->pool, pwd, "/"/*dir*/, GACL_VO_FILE, NULL);
   if (conf->path_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO sync script not configured.");
     return OK;			/* VO sync script not configured properly; not running script, returning OK anyway. */
@@ -939,30 +955,34 @@ do_cycle_cache_arrays(request_rec *r){
 void
 cycle_cache_arrays(request_rec *r){
   
-  int i;
+  config_rec* conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   config_rec* module_conf = get_module_conf();
   char* top_gacl_paths[2];
   int cache_len;
+  int i;
   
-  if(GACL_ROOT != NULL){
-    top_gacl_paths[0] = apr_pstrcat(module_conf->pool_, GACL_ROOT, "/", top_gacl_file, NULL);
-    top_gacl_paths[1] = apr_pstrcat(module_conf->pool_, GACL_ROOT, "/", top_gacl_vo_file, NULL);
+  if (conf->gacldir_ != 0) {
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "GACL dir: %s.", conf->gacldir_);
+    top_gacl_paths[0] = apr_pstrcat(r->pool, conf->gacldir_, "/", GACL_FILE, NULL);
+    top_gacl_paths[1] = apr_pstrcat(r->pool, conf->gacldir_, "/", GACL_VO_FILE, NULL);
   }
   else{
-    top_gacl_paths[0] = apr_pstrcat(module_conf->pool_, DOCUMENT_ROOT, "/", top_gacl_file, NULL);
-    top_gacl_paths[1] = apr_pstrcat(module_conf->pool_, DOCUMENT_ROOT, "/", top_gacl_vo_file, NULL);
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "GACL dir not configured.");
+    /* GACL dir not configured don't cycle. */
+    return;
   }
   
   cache_len = module_conf->acl_cache_->file_array_->nelts;
   
   for (i = 0; i < sizeof(top_gacl_paths)/sizeof(char*); i++) {
-
+  	
     if(apr_strnatcmp(((char**)module_conf->acl_cache_->file_array_->elts)[cache_len-1],
        top_gacl_paths[i]) != 0){
      	continue;
     }
     
     do_cycle_cache_arrays(r);
+    
   	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "keeping '%s' in cache --> '%s'",
   	   ((const char**)(module_conf->acl_cache_->file_array_->elts))[0],
 	     top_gacl_paths[i]);
@@ -1136,8 +1156,8 @@ check_auth(request_rec *r)
   if (r->method_number == M_PROPFIND)
     perm0 = GRST_PERM_LIST;
     
-  if(apr_strnatcmp(r->filename, gacl_file) == 0 ||
-     apr_strnatcmp(r->filename, gacl_vo_file) == 0){
+  if(apr_strnatcmp(r->filename, GACL_FILE) == 0 ||
+     apr_strnatcmp(r->filename, GACL_VO_FILE) == 0){
 			perm0 = GRST_PERM_ADMIN;
 		}
 
@@ -1205,8 +1225,8 @@ check_auth(request_rec *r)
   find_gacl_file(r, pwd);
   
   /* Load the ACLs. */
-  acl1 = load_acl(r, (char*)gacl_file);
-  acl2 = load_acl(r, (char*)gacl_vo_file);
+  acl1 = load_acl(r, (char*)GACL_FILE);
+  acl2 = load_acl(r, (char*)GACL_VO_FILE);
 
   /* If gacl file(s) were found, check permissions, otherwise carry on and stick with defaults. */
   perm1 = DEFAULT_PERM;
