@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -u
+
 #  mk_vo.sh <path>
 #
 #  Sample script for generating lists of VO members. To be used with
@@ -30,6 +32,7 @@
 DOCUMENT_ROOT="/var/www/html/grid/data"
 GACL_FILE=".gacl"
 GACL_VO_FILE=".gacl_vo"
+LOCK_FILE=".gacl_lock"
 DN_LIST_TAG="dn-list"
 DN_LIST_URL_TAG="url"
 MAX_RECURSE=12
@@ -98,7 +101,6 @@ if [ -z "$check" ]; then
   exit 0
 fi
 
-
 # Get the list of URLs
 gacl_line=`sed -n '1h;2,$H;${g;s/\n//g;p}' .gacl | sed -r 's/>\s+</></g'`
 old_line=""
@@ -133,6 +135,14 @@ entries_list=`echo "$entries_list" | sed -r 's|(.+)<gacl>.*|\1|i'`https://
 #
 # Write the .gacl_vo file.
 #
+
+# Write a lock.
+# From http://www.davidpashley.com/articles/writing-robust-shell-scripts.html
+if ( set -o noclobber; echo "$$" > "$LOCK_FILE") 2> /dev/null; 
+then
+   trap 'rm -f "$LOCK_FILE"; exit 0' INT TERM EXIT
+
+# ------------------------------------------------
 
 echo "Writing file $GACL_VO_FILE"
 
@@ -173,3 +183,14 @@ if [ -z "$ok" ]; then
   echo "VO file empty, deleting GACL VO file."
   rm $GACL_VO_FILE
 fi
+
+# ------------------------------------------------
+
+# Clear lock
+   rm -f "$LOCK_FILE"
+   trap - INT TERM EXIT
+else
+   echo "Failed to acquire lock file: $LOCK_FILE." 
+   echo "Held by $(cat $LOCK_FILE)"
+fi
+
