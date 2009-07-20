@@ -83,6 +83,11 @@
  *      Specifies path to directory containing the most accessed .gacl file.
  *      If specified, the ACL of this file and, if needed, the corresponding
  *      .gacl_vo file are kept in memory cache.
+ * 
+ *   ACLCacheSize "number of ACLs cached in memory"
+ *      Specifies the number of ACLs cached in memory by each httpd process.
+ *      This cache serves to reduce the disk I/O which can be a significant
+ *      bottleneck.
  *
  *   VOTimeoutSeconds  "seconds"
  *       Number of seconds to cache dn-lists.
@@ -191,10 +196,7 @@ static int DEFAULT_PERM = GRST_PERM_READ;
 static char* GACL_ROOT = NULL;
 
 /* VO timout in seconds */
-int VO_TIMEOUT_SECONDS;
-
-/* Default VO timout in seconds - overridden by VOTimeoutSeconds */
-static const long DEFAULT_VO_TIMEOUT_SECONDS = 300;
+int VO_TIMEOUT_SECONDS = 300;
 
 /* Apache serverRoot */
 static char* DOCUMENT_ROOT = NULL;
@@ -210,7 +212,7 @@ static unsigned int GACL_PARSE_ATTEMPTS = 30;
 static unsigned int GACL_PARSE_INTERVAL = 10;
 
 /* Number of ACLs cached in memory */
-static unsigned int GACL_CACHE_SIZE = 200;
+unsigned int ACL_CACHE_SIZE = 200;
 
 /* Number of times this module is executed before the ACL cache is flushed
  * (this is to avoid leaking memory) */
@@ -238,6 +240,7 @@ typedef struct {
   int count_;
   apr_pool_t* pool_;
   acl_cache* acl_cache_;
+  int cachesize_;
 #if APR_HAS_THREADS
   apr_thread_mutex_t* mutex_;
 #endif
@@ -247,9 +250,9 @@ static acl_cache*
 make_acl_cache(apr_pool_t* p)
 {  
 	acl_cache* cache;
-	cache->acl_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(GRSTgaclAcl*));
-	cache->file_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(const char*));
-	cache->date_array_ = apr_array_make(p, GACL_CACHE_SIZE, sizeof(time_t*));
+	cache->acl_array_ = apr_array_make(p, ACL_CACHE_SIZE, sizeof(GRSTgaclAcl*));
+	cache->file_array_ = apr_array_make(p, ACL_CACHE_SIZE, sizeof(const char*));
+	cache->date_array_ = apr_array_make(p, ACL_CACHE_SIZE, sizeof(time_t*));
 	return cache;
 }
 
@@ -371,6 +374,16 @@ config_timeout(cmd_parms* cmd, void* mconfig, const char* arg)
   return 0;
 }
 
+static const char*
+config_cachesize(cmd_parms* cmd, void* mconfig, const char* arg)
+{
+  if (((config_rec*)mconfig)->cachesize_ > 0)
+    return "Cache size already set.";
+
+  ((config_rec*)mconfig)->cachesize_ = atoi(arg);
+  return 0;
+}
+
 static const command_rec command_table[] = {
   AP_INIT_TAKE1(
     "AuthScriptFile", config_path, NULL, OR_AUTHCFG,
@@ -387,6 +400,9 @@ static const command_rec command_table[] = {
   AP_INIT_TAKE1(
     "VOTimeoutSeconds", config_timeout, NULL, OR_AUTHCFG,
     "Cache timeout for VO lists (dn-lists)."),
+  AP_INIT_TAKE1(
+    "ACLCacheSize", config_cachesize, NULL, OR_AUTHCFG,
+    "Number of ACLs cached in memory."),
   { NULL }
 };
 
@@ -763,9 +779,7 @@ check_user_id(request_rec *r)
 
   if (conf->timeout_ < 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO timeout not configured.");
-    /* Default permission not configured properly; leaving GACL_ROOT as NULL -
-     * meaning GACL files are assumed to be next to the files served. */
-    VO_TIMEOUT_SECONDS = DEFAULT_VO_TIMEOUT_SECONDS;
+    /* Default permission not configured properly; leaving it at its default. */
   }
   else{
     VO_TIMEOUT_SECONDS = conf->timeout_;
@@ -877,7 +891,7 @@ check_user_id(request_rec *r)
 
 /**
  * Load ACL from file.
- * Notice that GACL_CACHE_SIZE GACL files are cached in memory.
+ * Notice that ACL_CACHE_SIZE GACL files are cached in memory.
  */
 GRSTgaclAcl*
 parse_gacl_file(request_rec *r, char* gacl_file)
@@ -972,6 +986,15 @@ cycle_cache_arrays(request_rec *r){
     return;
   }
   
+  if (conf->cachesize_ < 0) {
+    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "ACL cache size not configured.");
+    /* Default permission not configured properly; leaving it at its default. */
+  }
+  else{
+    ACL_CACHE_SIZE = conf->cachesize_;
+    ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "ACL cache size: %i.", ACL_CACHE_SIZE);
+  }
+  
   cache_len = module_conf->acl_cache_->file_array_->nelts;
   
   for (i = 0; i < sizeof(top_gacl_paths)/sizeof(char*); i++) {
@@ -1060,7 +1083,7 @@ acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int i)
 	}
 	else{
 		// If the arrays are full, remove last entry from each
-		if(module_conf->acl_cache_->file_array_->nelts == GACL_CACHE_SIZE){
+		if(module_conf->acl_cache_->file_array_->nelts == ACL_CACHE_SIZE){
       // If the last element is one that should be kept, cycle it up before popping
       cycle_cache_arrays(r);
 	  	apr_array_pop(module_conf->acl_cache_->acl_array_);
