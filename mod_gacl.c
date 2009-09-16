@@ -747,7 +747,7 @@ check_user_id(request_rec *r)
   GACL_ROOT = conf->root_;
   if (conf->root_ == 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "GACL root not configured.");
-    /* Default permission not configured properly; leaving GACL_ROOT as NULL -
+    /* GACL root not configured properly; leaving GACL_ROOT as NULL -
      * meaning GACL files are assumed to be next to the files served. */
   }
   else{
@@ -779,7 +779,7 @@ check_user_id(request_rec *r)
 
   if (conf->timeout_ < 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO timeout not configured.");
-    /* Default permission not configured properly; leaving it at its default. */
+    /* VO timeout not configured properly; leaving it at its default. */
   }
   else{
     VO_TIMEOUT_SECONDS = conf->timeout_;
@@ -988,7 +988,7 @@ cycle_cache_arrays(request_rec *r){
   
   if (conf->cachesize_ < 0) {
     ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "ACL cache size not configured.");
-    /* Default permission not configured properly; leaving it at its default. */
+    /* ACL cache size not configured properly; leaving it at its default. */
   }
   else{
     ACL_CACHE_SIZE = conf->cachesize_;
