@@ -746,7 +746,7 @@ check_user_id(request_rec *r)
 
   GACL_ROOT = conf->root_;
   if (conf->root_ == 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "GACL root not configured.");
+    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "GACL root not configured.");
     /* GACL root not configured properly; leaving GACL_ROOT as NULL -
      * meaning GACL files are assumed to be next to the files served. */
   }
@@ -763,7 +763,7 @@ check_user_id(request_rec *r)
   }
   
   if (conf->perm_ == NULL) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "Default permission not configured.");
+    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "Default permission not configured.");
     /* Default permission not configured properly; leaving DEFAULT_PERM as it is. */
   }
   else{
@@ -778,7 +778,7 @@ check_user_id(request_rec *r)
   }
 
   if (conf->timeout_ < 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO timeout not configured.");
+    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "VO timeout not configured.");
     /* VO timeout not configured properly; leaving it at its default. */
   }
   else{
@@ -794,7 +794,7 @@ check_user_id(request_rec *r)
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "Dir: %s.", dir);
   gacl_vo_file_path = apr_pstrcat(r->pool, pwd, "/"/*dir*/, GACL_VO_FILE, NULL);
   if (conf->path_ == 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "VO sync script not configured.");
+    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "VO sync script not configured.");
     return OK;			/* VO sync script not configured properly; not running script, returning OK anyway. */
   }
   else{
@@ -981,13 +981,13 @@ cycle_cache_arrays(request_rec *r){
     top_gacl_paths[1] = apr_pstrcat(r->pool, conf->gacldir_, "/", GACL_VO_FILE, NULL);
   }
   else{
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "GACL dir not configured.");
+    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "GACL dir not configured.");
     /* GACL dir not configured don't cycle. */
     return;
   }
   
   if (conf->cachesize_ < 0) {
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "ACL cache size not configured.");
+    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "ACL cache size not configured.");
     /* ACL cache size not configured properly; leaving it at its default. */
   }
   else{
@@ -1222,7 +1222,7 @@ check_auth(request_rec *r)
   
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "client DN '%s'",client_dn);
   if(client_dn == NULL){
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "unauthorized: client DN '%s'",client_dn);
+    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "unauthorized: client DN '%s'",client_dn);
     return HTTP_UNAUTHORIZED;
   }
 
@@ -1238,7 +1238,7 @@ check_auth(request_rec *r)
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current directory: %s", getcwd(NULL, 0));
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "chdir() to '%s'", pwd);
   if (chdir(pwd) < 0){
-    ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "chdir() to '%s' failed", pwd);
+    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "chdir() to '%s' failed", pwd);
   }  
   
   GRSTgaclInit();
