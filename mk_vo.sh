@@ -153,7 +153,7 @@ for url in $url_list; do
   perms=`echo "$perms" | sed -r "s|.*$url1([^\t]+)\t.*|\1|"`
   echo URL: "$url"
   echo PERMS: "$perms"
-  curl --insecure $url 2>/dev/null > $TMP_FILE
+  curl --insecure -L $url 2>/dev/null > $TMP_FILE
   ## Make sure we have a newline at the end. Otherwise read will ignore the last line
   echo >> $TMP_FILE
   cat /$TMP_FILE | sed 's/\"//g' | while read name; do

@@ -249,7 +249,7 @@ typedef struct {
 static acl_cache*
 make_acl_cache(apr_pool_t* p)
 {  
-	acl_cache* cache;
+	acl_cache* cache = (acl_cache*)apr_pcalloc(p, sizeof(acl_cache));
 	cache->acl_array_ = apr_array_make(p, ACL_CACHE_SIZE, sizeof(GRSTgaclAcl*));
 	cache->file_array_ = apr_array_make(p, ACL_CACHE_SIZE, sizeof(const char*));
 	cache->date_array_ = apr_array_make(p, ACL_CACHE_SIZE, sizeof(time_t*));
@@ -1019,7 +1019,7 @@ cycle_cache_arrays(request_rec *r){
 void
 acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int i)
 {
-  config_rec* conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
+  //config_rec* conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
   config_rec* module_conf = get_module_conf();
   
   struct stat attrib;
@@ -1133,7 +1133,6 @@ load_acl(request_rec *r, char* gacl_file)
 	GRSTgaclAcl* acl = NULL;
 	int gacl_cache_index = -1;
  	int gacl_file_ok = access(gacl_file, F_OK);
- 	int i;
   if (gacl_file_ok == 0) {
   	// Check cache
   	gacl_cache_index = acl_cache_check(r, gacl_file);
@@ -1157,7 +1156,6 @@ check_auth(request_rec *r)
   config_rec* conf;
   const char* client_dn;
   const char* client_cn;
-  int gacl_file1_ok, gacl_file2_ok;
   GRSTgaclAcl   *acl1, *acl2;
   GRSTgaclPerm   perm0, perm1, perm2;
   request_rec* subreq;
