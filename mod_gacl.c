@@ -869,7 +869,7 @@ check_user_id(request_rec *r)
 	config_rec* module_conf = get_module_conf();
 	for(i = 0; i<module_conf->acl_cache_->acl_array_->nelts; i++){
 		char* cached_file = ((char**)module_conf->acl_cache_->file_array_->elts)[i];
-		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "checking cache entry %i: '%s' <-->'%s'",
+		ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "checking cache entry %i: '%s' <-->'%s'",
 		   i, cached_file, gacl_file_path);
 		if(apr_strnatcmp(cached_file, gacl_file_path) == 0){
 			return i;
@@ -1108,7 +1108,7 @@ acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int i)
 	  int i;
     for (i = 0; i < module_conf->acl_cache_->file_array_->nelts; i++) {
       const char *s = ((const char**)module_conf->acl_cache_->file_array_->elts)[i];
-      ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "%d: %s", i, s);
+      ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "%d: %s", i, s);
     }
 	
 	}
