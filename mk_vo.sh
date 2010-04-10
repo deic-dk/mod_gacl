@@ -190,7 +190,7 @@ fi
    rm -f "$LOCK_FILE"
    trap - INT TERM EXIT
 else
-   echo "Failed to acquire lock file: $LOCK_FILE." 
-   echo "Held by $(cat $LOCK_FILE)"
+   echo "Failed to acquire lock file: $LOCK_FILE." 1>&2
+   echo "Held by $(cat $LOCK_FILE)" 1>&2
 fi
 
