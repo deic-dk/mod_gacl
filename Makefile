@@ -28,7 +28,7 @@ link:
 	ln -sf ${LIB_GACL}.so.${GRIDSITE_VERSION} ${LIB_GACL}.so
 
 libgacl: ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
-	gcc -shared -Wl,-soname,${LIB_GACL}.so.${GRIDSITE_VERSION} -o ${LIB_GACL}.so.${GRIDSITE_VERSION} \
+	gcc -fPIC -shared -Wl,-soname,${LIB_GACL}.so.${GRIDSITE_VERSION} -o ${LIB_GACL}.so.${GRIDSITE_VERSION} \
 	-I/usr/include/libxml2 -I./gacl_interface  -L/usr/lib \
   -lxml2 ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
 
