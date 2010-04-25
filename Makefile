@@ -7,7 +7,8 @@ MODNAME = gacl
 MODFILE = mod_${MODNAME}.so
 SRC2 = mod_${MODNAME}.c
 MODFILE2 = mod_${MODNAME}.la
-APXS2 = apxs2
+# You may have to set the variable below manually
+APXS2=`ls /usr/bin/apxs* /usr/sbin/apxs* 2>/dev/null | head -1`
 
 GRIDSITE_VERSION = 1.6.0
 LIB_GACL=libgacl
