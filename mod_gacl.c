@@ -206,7 +206,7 @@ static unsigned int MAX_RECURSE = 10;
 
 /* Number of attempts to parse a GACL file - failures will usually be due to
  * another apache process parsing the same GACL file at the same time */
-static unsigned int GACL_PARSE_ATTEMPTS = 30;
+static unsigned int GACL_PARSE_ATTEMPTS = 10;
 
 /* Number of seconds between each parse attempt */
 static unsigned int GACL_PARSE_INTERVAL = 10;
