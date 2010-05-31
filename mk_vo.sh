@@ -32,6 +32,7 @@ set -u
 DOCUMENT_ROOT="/var/www/html/grid/data"
 GACL_FILE=".gacl"
 GACL_VO_FILE=".gacl_vo"
+TMP_GACL_VO_FILE=".gacl_vo.tmp"
 LOCK_FILE=".gacl_lock"
 DN_LIST_TAG="dn-list"
 DN_LIST_URL_TAG="url"
@@ -146,7 +147,7 @@ then
 
 echo "Writing file $GACL_VO_FILE"
 
-echo "<gacl>" > $GACL_VO_FILE
+echo "<gacl>" > $TMP_GACL_VO_FILE
 for url in $url_list; do
   url1=`echo $url | sed 's|http[s]*://|\t|g'`
   perms=`echo $entries_list | sed 's|http[s]*://|\t|g'`
@@ -165,7 +166,7 @@ for url in $url_list; do
   if [ -z "$test" ]; then
     continue
   fi
-cat >> $GACL_VO_FILE <<EOF
+cat >> $TMP_GACL_VO_FILE <<EOF
   <entry>
     <person>
       <dn>$name</dn>
@@ -176,7 +177,9 @@ EOF
   done
 done
 rm $TMP_FILE
-echo "</gacl>" >> $GACL_VO_FILE
+echo "</gacl>" >> $TMP_GACL_VO_FILE
+
+mv -f $TMP_GACL_VO_FILE $GACL_VO_FILE
 
 ok=`grep -r -v '^</*gacl>$' $GACL_VO_FILE`
 if [ -z "$ok" ]; then
