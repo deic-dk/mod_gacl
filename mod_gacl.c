@@ -216,7 +216,7 @@ unsigned int ACL_CACHE_SIZE = 200;
 
 /* Number of times this module is executed before the ACL cache is flushed
  * (this is to avoid leaking memory) */
-static unsigned int MAX_COUNT = 10000;
+static unsigned int MAX_COUNT = 1000;
 
 static AP_DECLARE_DATA ap_filter_rec_t* null_input_filter_handle = 0;
 static AP_DECLARE_DATA ap_filter_rec_t* null_output_filter_handle = 0;
@@ -256,9 +256,10 @@ make_acl_cache(apr_pool_t* p)
 	return cache;
 }
 
-static apr_status_t do_garbage(config_rec* conf)
+static apr_status_t do_garbage(request_rec *r, config_rec* conf)
 {
   if (conf->count_++ >= MAX_COUNT) {
+    ap_log_perror(MY_MARK, APLOG_INFO, 0, r->pool, "collecting garbage, %i >= %i", conf->count_, MAX_COUNT);
    /* Just clean up everything, including the hash and its contents
     * along with whatever may have leaked.
     */
@@ -732,7 +733,7 @@ check_user_id(request_rec *r)
   
 	/* Garbage collect ACL cache. */
 	config_rec* module_conf = get_module_conf();
-  apr_status_t rv = do_garbage(module_conf);
+  apr_status_t rv = do_garbage(r, module_conf);
   if(rv != APR_SUCCESS) {
 		ap_log_perror(MY_MARK, APLOG_ERR, rv, r->pool, "Failed to garbage collect for gacl_module");
 	};
