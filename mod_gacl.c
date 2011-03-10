@@ -1221,8 +1221,9 @@ check_auth(request_rec *r)
   
   ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "client DN '%s'",client_dn);
   if(client_dn == NULL){
-    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "unauthorized: client DN '%s'",client_dn);
-    return HTTP_UNAUTHORIZED;
+  	client_dn = "";
+    ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "no client cert: client DN '%s'",client_dn);
+    //return HTTP_UNAUTHORIZED;
   }
 
   /* chdir to GACL_ROOT or the dir containing the requested file. */
