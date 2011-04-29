@@ -37,7 +37,7 @@ LOCK_FILE=".gacl_lock"
 DN_LIST_TAG="dn-list"
 DN_LIST_URL_TAG="url"
 MAX_RECURSE=12
-TMP_FILE="/tmp/gacl_tmp_vo.txt"
+TMP_FILE="/tmp/$(basename $0).$$.tmp"
 
 #
 # First find the directory containing the .gacl file to check.
@@ -141,11 +141,16 @@ entries_list=`echo "$entries_list" | sed -r 's|(.+)<gacl>.*|\1|i'`https://
 # From http://www.davidpashley.com/articles/writing-robust-shell-scripts.html
 if ( set -o noclobber; echo "$$" > "$LOCK_FILE") 2> /dev/null; 
 then
-   trap 'rm -f "$LOCK_FILE"; exit 0' INT TERM EXIT
+  echo "Writing file $GACL_VO_FILE"
+else
+  echo "Failed to acquire lock file: $LOCK_FILE." 1>&2
+  echo "Held by $(cat $LOCK_FILE)" 1>&2
+  exit -1
+fi
+
+trap 'rm -f "$LOCK_FILE" "$GACL_VO_FILE"; exit 0' INT TERM EXIT
 
 # ------------------------------------------------
-
-echo "Writing file $GACL_VO_FILE"
 
 echo "<gacl>" > $TMP_GACL_VO_FILE
 for url in $url_list; do
@@ -176,7 +181,7 @@ cat >> $TMP_GACL_VO_FILE <<EOF
 EOF
   done
 done
-rm $TMP_FILE
+rm -f $TMP_FILE
 echo "</gacl>" >> $TMP_GACL_VO_FILE
 
 mv -f $TMP_GACL_VO_FILE $GACL_VO_FILE
@@ -184,16 +189,12 @@ mv -f $TMP_GACL_VO_FILE $GACL_VO_FILE
 ok=`grep -r -v '^</*gacl>$' $GACL_VO_FILE`
 if [ -z "$ok" ]; then
   echo "VO file empty, deleting GACL VO file."
-  rm $GACL_VO_FILE
+  rm -f $GACL_VO_FILE
 fi
 
 # ------------------------------------------------
 
 # Clear lock
-   rm -f "$LOCK_FILE"
-   trap - INT TERM EXIT
-else
-   echo "Failed to acquire lock file: $LOCK_FILE." 1>&2
-   echo "Held by $(cat $LOCK_FILE)" 1>&2
-fi
-
+rm -f "$LOCK_FILE"
+trap - INT TERM EXIT
+ 
