@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <install4j version="4.2.4" transformSequenceNumber="2">
   <directoryPresets config="./64bits/mod_gacl.so" />
-  <application name="GACL Apache module" distributionSourceDir="" applicationId="6918-2521-4005-4959" mediaDir="./distribution" mediaFilePattern="${compiler:sys.shortName}_${compiler:sys.platform}_${compiler:distro}_${compiler:sys.version}" compression="6" lzmaCompression="false" pack200Compression="false" excludeSignedFromPacking="true" keepModificationTimes="false" missingFilesStrategy="warn" shortName="mod_gacl" publisher="Frederik Orellana, Niels Bohr Institute, University of Copenhagen" publisherWeb="" version="0.9.0" allPathsRelative="true" backupOnSave="false" autoSave="false" convertDotsToUnderscores="true" macSignature="????" installerName="" javaMinVersion="0" javaMaxVersion="" allowBetaVM="false" jdkMode="runtimeJre" jdkName="">
+  <application name="GACL Apache module" distributionSourceDir="" applicationId="6918-2521-4005-4959" mediaDir="./distribution" mediaFilePattern="${compiler:sys.shortName}_${compiler:platform}_${compiler:distro}_${compiler:sys.version}" compression="6" lzmaCompression="false" pack200Compression="false" excludeSignedFromPacking="true" keepModificationTimes="false" missingFilesStrategy="warn" shortName="mod_gacl" publisher="Frederik Orellana, Niels Bohr Institute, University of Copenhagen" publisherWeb="" version="0.9.1" allPathsRelative="true" backupOnSave="false" autoSave="false" convertDotsToUnderscores="true" macSignature="????" installerName="" javaMinVersion="0" javaMaxVersion="" allowBetaVM="false" jdkMode="runtimeJre" jdkName="">
     <languages skipLanguageSelection="false" languageSelectionInPrincipalLanguage="false">
       <principalLanguage id="en" customLocalizationFile="" />
       <additionalLanguages />
@@ -13,6 +13,7 @@
     </searchSequence>
     <variables>
       <variable name="distro" value="fedora" />
+      <variable name="platform" value="i386" />
     </variables>
   </application>
   <files>
@@ -40,9 +41,9 @@
       <fileEntry mountPoint="95" file="./.libs/mod_gacl.so" overwrite="4" shared="false" mode="644" uninstallMode="0" />
       <fileEntry mountPoint="91" file="./libgacl.so.1.6.0" overwrite="4" shared="false" mode="644" uninstallMode="0" />
       <fileEntry mountPoint="96" file="./mk_vo.sh" overwrite="4" shared="false" mode="775" uninstallMode="0" />
-      <fileEntry mountPoint="183" file="./64bits/libgacl.so.1.6.0" overwrite="4" shared="false" mode="644" uninstallMode="0" />
       <fileEntry mountPoint="184" file="./64bits/mod_gacl.so" overwrite="4" shared="false" mode="644" uninstallMode="0" />
       <fileEntry mountPoint="185" file="./64bits/mod_gacl.so" overwrite="4" shared="false" mode="644" uninstallMode="0" />
+      <fileEntry mountPoint="183" file="./64bits/libgacl.so.1.6.0" overwrite="4" shared="false" mode="644" uninstallMode="0" />
       <fileEntry mountPoint="99" file="./gacl.conf" overwrite="5" shared="false" mode="644" uninstallMode="0" />
       <fileEntry mountPoint="142" file="./gacl.conf" overwrite="5" shared="false" mode="644" uninstallMode="0" />
     </entries>
@@ -293,7 +294,7 @@
     </applications>
   </installerGui>
   <mediaSets>
-    <linuxRPM name="Fedora RPM" id="48" mediaFileName="" installDir="/" overridePrincipalLanguage="false" requires64bit="false" jreBitType="all" runPostProcessor="false" postProcessor="" failOnPostProcessorError="false" includedJRE="" manualJREEntry="false" os="linux" arch="i386">
+    <linuxRPM name="Fedora i386 RPM" id="48" mediaFileName="" installDir="/" overridePrincipalLanguage="false" requires64bit="false" jreBitType="all" runPostProcessor="false" postProcessor="" failOnPostProcessorError="false" includedJRE="" manualJREEntry="false" os="linux" arch="i386">
       <excludedLaunchers />
       <excludedComponents />
       <excludedBeans />
@@ -303,7 +304,9 @@
         <entry location="usr/lib64/apache2" fileType="regular" />
         <entry location="etc/apache2" fileType="regular" />
       </exclude>
-      <variables />
+      <variables>
+        <variable name="platform" value="linux" />
+      </variables>
       <preInstallScript mode="1" file="">
         <scriptLines />
       </preInstallScript>
@@ -317,7 +320,7 @@
         <scriptLines />
       </postUninstallScript>
     </linuxRPM>
-    <linuxRPM name="Ubuntu RPM" id="51" mediaFileName="" installDir="/" overridePrincipalLanguage="false" requires64bit="false" jreBitType="all" runPostProcessor="false" postProcessor="" failOnPostProcessorError="false" includedJRE="" manualJREEntry="false" os="linux" arch="i386">
+    <linuxRPM name="Ubuntu i386 RPM" id="51" mediaFileName="" installDir="/" overridePrincipalLanguage="false" requires64bit="false" jreBitType="all" runPostProcessor="false" postProcessor="" failOnPostProcessorError="false" includedJRE="" manualJREEntry="false" os="linux" arch="i386">
       <excludedLaunchers />
       <excludedComponents />
       <excludedBeans />
@@ -329,6 +332,60 @@
       </exclude>
       <variables>
         <variable name="distro" value="ubuntu" />
+        <variable name="platform" value="linux" />
+      </variables>
+      <preInstallScript mode="1" file="">
+        <scriptLines />
+      </preInstallScript>
+      <postInstallScript mode="1" file="">
+        <scriptLines />
+      </postInstallScript>
+      <preUninstallScript mode="1" file="">
+        <scriptLines />
+      </preUninstallScript>
+      <postUninstallScript mode="1" file="">
+        <scriptLines />
+      </postUninstallScript>
+    </linuxRPM>
+    <linuxRPM name="Fedora x86_64 RPM" id="239" mediaFileName="" installDir="/" overridePrincipalLanguage="false" requires64bit="false" jreBitType="all" runPostProcessor="false" postProcessor="" failOnPostProcessorError="false" includedJRE="" manualJREEntry="false" os="linux" arch="i386">
+      <excludedLaunchers />
+      <excludedComponents />
+      <excludedBeans />
+      <overriddenPrincipalLanguage id="en" customLocalizationFile="" />
+      <exclude>
+        <entry location="usr/lib/apache2" fileType="regular" />
+        <entry location="usr/lib64/apache2" fileType="regular" />
+        <entry location="etc/apache2" fileType="regular" />
+      </exclude>
+      <variables>
+        <variable name="platform" value="x86_64" />
+      </variables>
+      <preInstallScript mode="1" file="">
+        <scriptLines />
+      </preInstallScript>
+      <postInstallScript mode="1" file="">
+        <scriptLines />
+      </postInstallScript>
+      <preUninstallScript mode="1" file="">
+        <scriptLines />
+      </preUninstallScript>
+      <postUninstallScript mode="1" file="">
+        <scriptLines />
+      </postUninstallScript>
+    </linuxRPM>
+    <linuxRPM name="Ubuntu x86_64 RPM" id="244" mediaFileName="" installDir="/" overridePrincipalLanguage="false" requires64bit="false" jreBitType="all" runPostProcessor="false" postProcessor="" failOnPostProcessorError="false" includedJRE="" manualJREEntry="false" os="linux" arch="i386">
+      <excludedLaunchers />
+      <excludedComponents />
+      <excludedBeans />
+      <overriddenPrincipalLanguage id="en" customLocalizationFile="" />
+      <exclude>
+        <entry location="usr/lib/httpd" fileType="regular" />
+        <entry location="usr/lib64/httpd" fileType="regular" />
+        <entry location="etc/httpd" fileType="regular" />
+      </exclude>
+      <variables>
+        <variable name="distro" value="ubuntu" />
+        <variable name="platform" value="x86_64" />
       </variables>
       <preInstallScript mode="1" file="">
         <scriptLines />
@@ -344,6 +401,9 @@
       </postUninstallScript>
     </linuxRPM>
   </mediaSets>
-  <buildIds buildAll="true" />
+  <buildIds buildAll="false">
+    <mediaSet refId="48" />
+    <mediaSet refId="51" />
+  </buildIds>
 </install4j>
 
