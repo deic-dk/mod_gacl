@@ -32,7 +32,7 @@ set -u
 DOCUMENT_ROOT="/var/www/html/grid/data"
 GACL_FILE=".gacl"
 GACL_VO_FILE=".gacl_vo"
-TMP_GACL_VO_FILE=".gacl_vo.tmp"
+TMP_GACL_VO_FILE=".gacl_vo.$(basename $0).$$.tmp"
 LOCK_FILE=".gacl_lock"
 DN_LIST_TAG="dn-list"
 DN_LIST_URL_TAG="url"
@@ -98,7 +98,17 @@ fi
 check=`grep "<$DN_LIST_TAG>" $GACL_FILE`
 if [ -z "$check" ]; then
   echo "no $DN_LIST_URL_TAG tag found"
-  rm -f $GACL_VO_FILE
+  if ( set -o noclobber; echo "$$" > "$LOCK_FILE") 2> /dev/null; 
+  then
+    echo "Deleting file $PWD/$GACL_VO_FILE"
+    trap 'rm -f "$GACL_VO_FILE" "$LOCK_FILE"; exit 0' INT TERM EXIT
+      rm -f "$GACL_VO_FILE" "$LOCK_FILE"
+    trap - INT TERM EXIT
+  else
+    echo "Failed to acquire lock file: $PWD/$LOCK_FILE." 1>&2
+    echo "Held by $(cat $LOCK_FILE)" 1>&2
+    echo "Leaving $PWD/$GACL_VO_FILE" 1>&2
+  fi
   exit 0
 fi
 
@@ -141,14 +151,15 @@ entries_list=`echo "$entries_list" | sed -r 's|(.+)<gacl>.*|\1|i'`https://
 # From http://www.davidpashley.com/articles/writing-robust-shell-scripts.html
 if ( set -o noclobber; echo "$$" > "$LOCK_FILE") 2> /dev/null; 
 then
-  echo "Writing file $GACL_VO_FILE"
+  echo "Writing file $PWD/$GACL_VO_FILE"
 else
-  echo "Failed to acquire lock file: $LOCK_FILE." 1>&2
+  echo "Failed to acquire lock file: $PWD/$LOCK_FILE." 1>&2
   echo "Held by $(cat $LOCK_FILE)" 1>&2
-  exit -1
+  echo "NOT writing new .gacl_vo now." 1>&2
+  exit 0
 fi
 
-trap 'rm -f "$LOCK_FILE" "$GACL_VO_FILE"; exit 0' INT TERM EXIT
+trap 'rm -f "$GACL_VO_FILE" "$LOCK_FILE"; exit 0' INT TERM EXIT
 
 # ------------------------------------------------
 
@@ -162,15 +173,15 @@ for url in $url_list; do
   curl --insecure -L $url 2>/dev/null > $TMP_FILE
   ## Make sure we have a newline at the end. Otherwise read will ignore the last line
   echo >> $TMP_FILE
-  cat /$TMP_FILE | sed 's/\"//g' | while read name; do
-  if [ -z "$name" ]; then
-    continue
-  fi
-  ## Ignore comments
-  test=`echo $name | sed -r 's|^\s*#.*$||'`
-  if [ -z "$test" ]; then
-    continue
-  fi
+  cat $TMP_FILE | sed 's/\"//g' | while read name; do
+    if [ -z "$name" ]; then
+      continue
+    fi
+    ## Ignore comments
+    test=`echo $name | sed -r 's|^\s*#.*$||'`
+    if [ -z "$test" ]; then
+      continue
+    fi
 cat >> $TMP_GACL_VO_FILE <<EOF
   <entry>
     <person>
@@ -183,12 +194,13 @@ EOF
 done
 rm -f $TMP_FILE
 echo "</gacl>" >> $TMP_GACL_VO_FILE
+echo >> $TMP_GACL_VO_FILE
 
 mv -f $TMP_GACL_VO_FILE $GACL_VO_FILE
 
 ok=`grep -r -v '^</*gacl>$' $GACL_VO_FILE`
 if [ -z "$ok" ]; then
-  echo "VO file empty, deleting GACL VO file."
+  echo "VO file empty, deleting $PWD/$GACL_VO_FILE."
   rm -f $GACL_VO_FILE
 fi
 
@@ -197,4 +209,3 @@ fi
 # Clear lock
 rm -f "$LOCK_FILE"
 trap - INT TERM EXIT
- 
