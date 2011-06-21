@@ -1167,8 +1167,8 @@ check_auth(request_rec *r)
   char* pwd;
   char* check_file_path;
   
-  if (r->method_number == M_GET)
-    perm0 = GRST_PERM_READ;
+  // Default to read
+  perm0 = GRST_PERM_READ;
 
   if (r->method_number == M_PUT || r->method_number == M_MKCOL ||
       r->method_number == M_COPY || r->method_number == M_MOVE ||
