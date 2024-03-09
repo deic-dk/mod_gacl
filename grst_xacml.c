@@ -46,9 +46,9 @@
 #endif
 #include <fnmatch.h>
 
-#include <libxml/xmlmemory.h>
-#include <libxml/tree.h>
-#include <libxml/parser.h>
+#include "libxml/xmlmemory.h"
+#include "libxml/tree.h"
+#include "libxml/parser.h"
 
 #include "gridsite.h"
 
@@ -185,7 +185,7 @@ static GRSTgaclEntry *GRSTxacmlEntryParse(xmlNodePtr cur)
           for (i=0; grst_perm_syms[i] != NULL; ++i)
             if (xmlStrcmp(xmlNodeGetContent(cur2->xmlChildrenNode->xmlChildrenNode), (const xmlChar *) grst_perm_syms[i]) == 0)
             {
-              
+
 #ifdef XACML_DEBUG
 	      fprintf (debugfile, "%s ", grst_perm_syms[i]);
 #endif
@@ -365,9 +365,9 @@ char *GRSTxacmlFileFindAclname(char *pathandfile)
          p = rindex(path, '/');
          if (p == NULL) break; /* must start without / and we there now ??? */
 
-         *p = '\0';     /* strip off another layer of / */                 
+         *p = '\0';     /* strip off another layer of / */
        }
-       
+
   free(path);
   return NULL;
 }
@@ -380,7 +380,7 @@ GRSTgaclAcl *GRSTxacmlAclLoadforFile(char *pathandfile)
   GRSTgaclAcl     *acl;
 
   path = GRSTxacmlFileFindAclname(pathandfile);
-  
+
   if (path != NULL)
     {
       acl = GRSTxacmlAclLoadFile(path);
@@ -436,6 +436,32 @@ int GRSTxacmlCredPrint(GRSTgaclCred *cred, FILE *fp)
 }
 
 
+int GRSTxacmlPermPrint(GRSTgaclPerm perm, FILE *fp)
+{
+  GRSTgaclPerm i;
+
+  for (i=GRST_PERM_READ; grst_perm_syms[i] != NULL; ++i)
+       if (perm == grst_perm_vals[i])
+         {
+
+	   fputs("\t\t\t\t<Action>\n", fp);
+	   fputs("\t\t\t\t\t<ActionMatch MatchId=\"urn:oasis:names:tc:xacml:1.0:function:string-equal\">\n", fp);
+	   fputs("\t\t\t\t\t\t<AttributeValue DataType=\"http://www.w3.org/2001/XMLSchema#string\">", fp);
+	   fprintf(fp, "%s", grst_perm_syms[i]);
+	   fputs("</AttributeValue>\n", fp);
+	   fputs("\t\t\t\t\t\t<ActionAttributeDesignator\n", fp);
+	   fputs("\t\t\t\t\t\t\tAttributeId=\"urn:oasis:names:tc:xacml:1.0:action:action-id\"\n", fp);
+	   fputs("\t\t\t\t\t\t\tDataType=\"http://www.w3.org/2001/XMLSchema#string\"/>\n", fp);
+	   fputs("\t\t\t\t\t</ActionMatch>\n", fp);
+	   fputs("\t\t\t\t</Action>\n",fp);
+
+           return 1;
+         }
+
+  return 0;
+}
+
+
 int GRSTxacmlEntryPrint(GRSTgaclEntry *entry, FILE *fp, int rule_number)
 {
   GRSTgaclCred  *cred;
@@ -483,31 +509,6 @@ int GRSTxacmlEntryPrint(GRSTgaclEntry *entry, FILE *fp, int rule_number)
   return 1;
 }
 
-
-int GRSTxacmlPermPrint(GRSTgaclPerm perm, FILE *fp)
-{
-  GRSTgaclPerm i;
-
-  for (i=GRST_PERM_READ; grst_perm_syms[i] != NULL; ++i)
-       if (perm == grst_perm_vals[i])
-         {
-
-	   fputs("\t\t\t\t<Action>\n", fp);
-	   fputs("\t\t\t\t\t<ActionMatch MatchId=\"urn:oasis:names:tc:xacml:1.0:function:string-equal\">\n", fp);
-	   fputs("\t\t\t\t\t\t<AttributeValue DataType=\"http://www.w3.org/2001/XMLSchema#string\">", fp);
-	   fprintf(fp, "%s", grst_perm_syms[i]);
-	   fputs("</AttributeValue>\n", fp);
-	   fputs("\t\t\t\t\t\t<ActionAttributeDesignator\n", fp);
-	   fputs("\t\t\t\t\t\t\tAttributeId=\"urn:oasis:names:tc:xacml:1.0:action:action-id\"\n", fp);
-	   fputs("\t\t\t\t\t\t\tDataType=\"http://www.w3.org/2001/XMLSchema#string\"/>\n", fp);
-	   fputs("\t\t\t\t\t</ActionMatch>\n", fp);
-	   fputs("\t\t\t\t</Action>\n",fp);
-
-           return 1;
-         }
-
-  return 0;
-}
 
 int GRSTxacmlAclPrint(GRSTgaclAcl *acl, FILE *fp, char* dir_uri)
 {

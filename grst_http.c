@@ -8,11 +8,11 @@
 
      o Redistributions of source code must retain the above
        copyright notice, this list of conditions and the following
-       disclaimer. 
+       disclaimer.
      o Redistributions in binary form must reproduce the above
        copyright notice, this list of conditions and the following
        disclaimer in the documentation and/or other materials
-       provided with the distribution. 
+       provided with the distribution.
 
    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
    CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
@@ -46,6 +46,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <ctype.h>
 
 #include "gridsite.h"
 
@@ -63,7 +64,7 @@ void GRSThttpPrintf(GRSThttpBody *thisbody, char *fmt, ...)
   va_list  args;
 
   va_start(args, fmt);
-  size = vasprintf(&p, fmt, args);  
+  size = vasprintf(&p, fmt, args);
   va_end(args);
 
   if      (size == 0) free(p); /* don't need to bother in this case */
@@ -74,8 +75,8 @@ void GRSThttpPrintf(GRSThttpBody *thisbody, char *fmt, ...)
           thisbody->first = (GRSThttpCharsList *)malloc(sizeof(GRSThttpCharsList));
           thisbody->first->text = p;
           thisbody->first->next = NULL;
-      
-          thisbody->last = thisbody->first;          
+
+          thisbody->last = thisbody->first;
           thisbody->size = size;
         }
       else
@@ -84,15 +85,15 @@ void GRSThttpPrintf(GRSThttpBody *thisbody, char *fmt, ...)
                                                malloc(sizeof(GRSThttpCharsList));
           ((GRSThttpCharsList *) thisbody->last->next)->text = p;
           ((GRSThttpCharsList *) thisbody->last->next)->next = NULL;
-      
-          thisbody->last = thisbody->last->next;          
+
+          thisbody->last = thisbody->last->next;
           thisbody->size = thisbody->size + size;
         }
     }
 }
 
 int GRSThttpCopy(GRSThttpBody *thisbody, char *file)
-/* 
+/*
    copy a whole file, named file[], into the body output buffer, returning
    1 if file was found and copied ok, or 0 otherwise.
 */
@@ -123,27 +124,27 @@ int GRSThttpCopy(GRSThttpBody *thisbody, char *file)
   p[len] = '\0';
 
   close(fd);
-   
+
   if (thisbody->size == 0) /* need to initialise */
     {
       thisbody->first = (GRSThttpCharsList *) malloc(sizeof(GRSThttpCharsList));
       thisbody->first->text = p;
       thisbody->first->next = NULL;
-      
+
       thisbody->last = thisbody->first;
       thisbody->size = len;
     }
   else
-    { 
+    {
       thisbody->last->next=(GRSThttpCharsList *)malloc(sizeof(GRSThttpCharsList));
       ((GRSThttpCharsList *) thisbody->last->next)->text = p;
       ((GRSThttpCharsList *) thisbody->last->next)->next = NULL;
-      
+
       thisbody->last = thisbody->last->next;
       thisbody->size = thisbody->size + len;
     }
 
-  return 1;      
+  return 1;
 }
 
 void GRSThttpWriteOut(GRSThttpBody *thisbody)
@@ -151,21 +152,21 @@ void GRSThttpWriteOut(GRSThttpBody *thisbody)
    standard output */
 {
   GRSThttpCharsList *p;
-  
-  printf("Content-Length: %d\n\n", thisbody->size);
+
+  printf("Content-Length: %d\n\n", (int) thisbody->size);
 
   p = thisbody->first;
-  
+
   while (p != NULL)
     {
       fputs(p->text, stdout);
-    
-      p = p->next;      
+
+      p = p->next;
     }
 }
 
 int GRSThttpPrintHeaderFooter(GRSThttpBody *bp, char *file, char *headfootname)
-/* 
+/*
     try to print Header or Footer appropriate for absolute path file[],
     returning 1 rather than 0 if found.
 */
@@ -178,9 +179,9 @@ int GRSThttpPrintHeaderFooter(GRSThttpBody *bp, char *file, char *headfootname)
   strcpy(pathfile, file);
 
   if ((pathfile[strlen(pathfile) - 1] != '/') &&
-      (stat(pathfile, &statbuf) == 0) && 
+      (stat(pathfile, &statbuf) == 0) &&
        S_ISDIR(statbuf.st_mode)) strcat(pathfile, "/");
-  
+
   for (;;)
      {
        p = rindex(pathfile, '/');
@@ -204,7 +205,7 @@ int GRSThttpPrintHeaderFooter(GRSThttpBody *bp, char *file, char *headfootname)
 int GRSThttpPrintHeader(GRSThttpBody *bp, char *file)
 {
   char *headname;
-  
+
   headname = getenv("REDIRECT_GRST_HEAD_FILE");
   if (headname == NULL) headname = getenv("GRST_HEAD_FILE");
   if (headname == NULL) headname = GRST_HEADFILE;
@@ -213,14 +214,14 @@ int GRSThttpPrintHeader(GRSThttpBody *bp, char *file)
     {
       return GRSThttpCopy(bp, headname);
     }
-    
+
   return GRSThttpPrintHeaderFooter(bp, file, headname);
 }
 
 int GRSThttpPrintFooter(GRSThttpBody *bp, char *file)
 {
   char *footname;
-  
+
   footname = getenv("REDIRECT_GRST_FOOT_FILE");
   if (footname == NULL) footname = getenv("GRST_FOOT_FILE");
   if (footname == NULL) footname = GRST_FOOTFILE;
@@ -229,12 +230,12 @@ int GRSThttpPrintFooter(GRSThttpBody *bp, char *file)
     {
       return GRSThttpCopy(bp, footname);
     }
-    
+
   return GRSThttpPrintHeaderFooter(bp, file, footname);
 }
 
 char *GRSThttpGetCGI(char *name)
-/* 
+/*
    Return a malloc()ed copy of CGI form parameter identified by name[],
    either received by QUERY_STRING (via GET) or on stdin (via POST).
    Caller must free() the returned string itself. If name[] is not found,
@@ -254,7 +255,7 @@ char *GRSThttpGetCGI(char *name)
 
       querystring = getenv("REDIRECT_QUERY_STRING");
       if (querystring == NULL) querystring = getenv("QUERY_STRING");
-      
+
       if (querystring == NULL) cgiposted = malloc(contentlength + 3);
       else cgiposted = malloc(contentlength + strlen(querystring) + 4);
 
@@ -264,7 +265,7 @@ char *GRSThttpGetCGI(char *name)
          {
            c = getchar();
            if (c == EOF) break;
-           cgiposted[i] = c;           
+           cgiposted[i] = c;
          }
 
       cgiposted[i]   = '&';
@@ -276,43 +277,43 @@ char *GRSThttpGetCGI(char *name)
           strcat(cgiposted, "&");
         }
     }
-    
+
   namepattern = malloc(strlen(name) + 3);
   sprintf(namepattern, "&%s=", name);
-  
+
   p = strstr(cgiposted, namepattern);
   free(namepattern);
   if (p == NULL) return strdup("");
-     
+
   valuestart = &p[strlen(name) + 2];
 
   for (n=0; valuestart[n] != '&'; ++n) ;
-  
+
   returnvalue = malloc(n + 1);
-  
+
   j=0;
-  
-  for (i=0; i < n; ++i) 
+
+  for (i=0; i < n; ++i)
      {
        if ((i < n - 2) && (valuestart[i] == '%')) /* url encoded as %HH */
          {
            returnvalue[j] = 0;
-           
-           if (isdigit(valuestart[i+1])) 
+
+           if (isdigit(valuestart[i+1]))
                  returnvalue[j] += 16 * (valuestart[i+1] - '0');
-           else if (isalpha(valuestart[i+1])) 
+           else if (isalpha(valuestart[i+1]))
                  returnvalue[j] += 16 * (10 + tolower(valuestart[i+1]) - 'a');
-                         
-           if (isdigit(valuestart[i+2])) 
+
+           if (isdigit(valuestart[i+2]))
                  returnvalue[j] += valuestart[i+2] - '0';
-           else if (isalpha(valuestart[i+2])) 
+           else if (isalpha(valuestart[i+2]))
                  returnvalue[j] += 10 + tolower(valuestart[i+2]) - 'a';
 
            i = i + 2;
          }
        else if (valuestart[i] == '+') returnvalue[j] = ' ';
        else                           returnvalue[j] = valuestart[i];
-       
+
        if (returnvalue[j] == '\r') continue; /* CR/LF -> LF */
        ++j;
      }
@@ -330,38 +331,38 @@ char *GRSThttpUrlDecode(char *in)
 {
   int   i, j, n;
   char *out;
-                                                                                
+
   n = strlen(in);
   out = malloc(n + 1);
-                                                                                
+
   j=0;
-                                                                                
+
   for (i=0; i < n; ++i)
      {
        if ((i < n - 2) && (in[i] == '%')) /* url encoded as %HH */
          {
            out[j] = 0;
-                                                                                
+
            if (isdigit(in[i+1]))
                  out[j] += 16 * (in[i+1] - '0');
            else if (isalpha(in[i+1]))
                  out[j] += 16 * (10 + tolower(in[i+1]) - 'a');
-                                                                                
+
            if (isdigit(in[i+2]))
                  out[j] += in[i+2] - '0';
            else if (isalpha(in[i+2]))
                  out[j] += 10 + tolower(in[i+2]) - 'a';
-                                                                                
+
            i = i + 2;
          }
        else if (in[i] == '+') out[j] = ' ';
        else                   out[j] = in[i];
-                                                                                
+
        ++j;
      }
-                                                                                
+
   out[j] = '\0';
-                                                                                
+
   return out;
 }
 
@@ -372,12 +373,12 @@ char *GRSThttpUrlEncode(char *in)
    assuming they do not exceed restrictions on filename length.) */
 {
   char *out, *p, *q;
-  
+
   out = malloc(3*strlen(in) + 1);
-  
+
   p = in;
   q = out;
-  
+
   while (*p != '\0')
        {
          if (isalnum(*p) || (*p == '.') || (*p == '_') || (*p == '-'))
@@ -393,28 +394,28 @@ char *GRSThttpUrlEncode(char *in)
 
          ++p;
        }
-  
-  *q = '\0';  
+
+  *q = '\0';
   return out;
 }
 
 char *GRSThttpUrlMildencode(char *in)
 /* Return a pointer to a malloc'd string holding a partially URL-encoded
-   version of *in. "Partially" means that A-Z a-z 0-9 . = - _ @ and / 
+   version of *in. "Partially" means that A-Z a-z 0-9 . = - _ @ and /
    are passed through unmodified. (DN's processed by GRSThttpUrlMildencode()
    can be used as valid Unix paths+filenames if you are prepared to
    create or simulate the resulting /X=xyz directories.) */
 {
   char *out, *p, *q;
-  
+
   out = malloc(3*strlen(in) + 1);
-  
+
   p = in;
   q = out;
-  
+
   while (*p != '\0')
        {
-         if (isalnum(*p) || (*p == '.') || (*p == '=') || (*p == '-') 
+         if (isalnum(*p) || (*p == '.') || (*p == '=') || (*p == '-')
                          || (*p == '/') || (*p == '@') || (*p == '_'))
            {
              *q = *p;
@@ -433,8 +434,8 @@ char *GRSThttpUrlMildencode(char *in)
 
          ++p;
        }
-  
-  *q = '\0';  
+
+  *q = '\0';
   return out;
 }
 
@@ -459,7 +460,7 @@ char *GRSThttpMakeOneTimePasscode(time_t timestamp, char *method, char *url)
   if (m == NULL) return NULL;
 
   asprintf(&stringtohash, "%08x:%s:%s", timestamp, method, url);
- 
+
   EVP_DigestInit(&ctx, m);
   EVP_DigestUpdate(&ctx, stringtohash, strlen(stringtohash));
   EVP_DigestFinal(&ctx, hashedstring, &len);
@@ -468,7 +469,7 @@ char *GRSThttpMakeOneTimePasscode(time_t timestamp, char *method, char *url)
 
   sprintf(returnstring, "%08x", timestamp);
 
-  for (i=0; 
+  for (i=0;
 
   return returnstring;
 }

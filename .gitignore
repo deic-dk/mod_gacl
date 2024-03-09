@@ -1,0 +1,10 @@
+/.cproject
+/.libs/
+/.project
+/.settings/
+/distribution/
+/libgacl.so
+/libgacl.so.1.6.0
+/mod_gacl.la
+/mod_gacl.lo
+/mod_gacl.slo
