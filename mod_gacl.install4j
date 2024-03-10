@@ -4,7 +4,7 @@
   <application name="GACL Apache module" applicationId="6918-2521-4005-4959" mediaDir="./distribution" mediaFilePattern="${compiler:sys.shortName}_${compiler:platform}_${compiler:distro}_${compiler:sys.version}" shortName="mod_gacl" publisher="Frederik Orellana, Technical University of Denmark" version="0.9.1" allPathsRelative="true" macVolumeId="976c5118dc9ca9f3" javaMinVersion="0" jdkMode="runtimeJre">
     <variables>
       <variable name="distro" value="fedora" />
-      <variable name="platform" value="i386" />
+      <variable name="platform" value="x86_64" />
     </variables>
   </application>
   <files>
