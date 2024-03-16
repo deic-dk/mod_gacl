@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <install4j version="10.0.7" transformSequenceNumber="10">
   <directoryPresets config="./64bits/mod_gacl.so" />
-  <application name="GACL Apache module" applicationId="6918-2521-4005-4959" mediaDir="./distribution" mediaFilePattern="${compiler:sys.shortName}_${compiler:platform}_${compiler:distro}_${compiler:sys.version}" shortName="mod_gacl" publisher="Frederik Orellana, Technical University of Denmark" version="0.9.1" allPathsRelative="true" macVolumeId="976c5118dc9ca9f3" javaMinVersion="0" jdkMode="runtimeJre">
+  <application name="GACL Apache module" applicationId="6918-2521-4005-4959" mediaDir="./distribution" mediaFilePattern="${compiler:sys.shortName}_${compiler:distro}_${compiler:sys.version}" shortName="mod_gacl" publisher="Frederik Orellana, Technical University of Denmark" version="0.9.2" allPathsRelative="true" macVolumeId="976c5118dc9ca9f3" javaMinVersion="0" jdkMode="runtimeJre">
     <variables>
-      <variable name="distro" value="fedora" />
-      <variable name="platform" value="x86_64" />
+      <variable name="platform" value="linux" />
+      <variable name="distro" />
     </variables>
   </application>
   <files>
@@ -464,27 +464,21 @@ return console.askYesNo(message, true);
     </styles>
   </installerGui>
   <mediaSets>
-    <linuxRPM name="Fedora x86_64 RPM" id="239" installDir="/" dependencies="apache2" arch="x86_64">
+    <linuxRPM name="Fedora RPM" id="239" installDir="/" dependencies="apache2" arch="x86_64">
       <variables>
-        <variable name="platform" value="x86_64" />
+        <variable name="distro" value="fedora" />
       </variables>
       <jreBundle jreBundleSource="none" />
     </linuxRPM>
-    <linuxRPM name="Ubuntu x86_64 Deb" id="244" installDir="/">
-      <exclude>
-        <entry location="usr/lib/httpd" />
-        <entry location="usr/lib64/httpd" />
-        <entry location="etc/httpd" />
-      </exclude>
+    <linuxDeb name="Linux Deb Archive" id="249" installDir="/" dependencies="apache2">
       <variables>
         <variable name="distro" value="ubuntu" />
-        <variable name="platform" value="x86_64" />
       </variables>
       <jreBundle jreBundleSource="none" />
-    </linuxRPM>
+    </linuxDeb>
   </mediaSets>
   <buildIds buildAll="false">
     <mediaSet refId="239" />
-    <mediaSet refId="244" />
+    <mediaSet refId="249" />
   </buildIds>
 </install4j>

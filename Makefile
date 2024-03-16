@@ -29,9 +29,11 @@ link:
 	ln -sf ${LIB_GACL}.so.${GRIDSITE_VERSION} ${LIB_GACL}.so
 
 libgacl: ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
-	gcc -fPIC -shared -Wl,-soname,${LIB_GACL}.so.${GRIDSITE_VERSION} -o ${LIB_GACL}.so.${GRIDSITE_VERSION} \
-	-I/usr/include/libxml2 -I./gacl_interface  -L/usr/lib \
-  -lxml2 ${GACL_SOURCE1} ${GACL_SOURCE2} ${GACL_SOURCE3}
+	gcc -fPIC -shared -Wl,-soname,${LIB_GACL}.so.${GRIDSITE_VERSION} \
+	-I/usr/include/libxml2 -I./gacl_interface  -L/usr/lib -L/usr/lib/x86_64-linux-gnu \
+	-o ${LIB_GACL}.so.${GRIDSITE_VERSION} \
+	${GACL_SOURCE2} ${GACL_SOURCE3} \
+	${GACL_SOURCE1} -lxml2
 
 install: libgacl link module
 	${APXS2} -i -a -n ${MODNAME} ${MODFILE2}
