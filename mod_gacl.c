@@ -180,6 +180,7 @@ static const char* GACL_VO_FILE = ".gacl_vo";
 /* Apache environment variable. This is used to get the DN used for authorizing.
  * In principle any variable could be used. */
 static const char* CLIENT_S_DN_STRING = "SSL_CLIENT_S_DN";
+static const char* REDIRECT_CLIENT_S_DN_STRING = "REDIRECT_SSL_CLIENT_S_DN";
 /* Apache environment variable. If this is non-empty and set, everything beyond its value
  * is stripped off the DN. If e.g. a client authenticates with
  * /O=Grid/O=NorduGrid/OU=nbi.dk/CN=Frederik Orellana/CN=65829253
@@ -465,12 +466,12 @@ int iterate_func(void *req, const char *key, const char *value)
 		return 1;
 }
 
-/*static int dump_request(request_rec *r)
+static int dump_request(request_rec *r)
 {
 		apr_table_do(iterate_func, r, r->headers_in, NULL);
 		apr_table_do(iterate_func, r, r->subprocess_env, NULL);
 	  return OK;
-}*/
+}
 
 static int get_perm(char* perm){
 	int ret = DEFAULT_PERM;
@@ -780,7 +781,8 @@ GRSTgaclAcl* parse_gacl_file(request_rec *r, char* gacl_file)
  // We do this in case another process is just writing or modifying the GACL file.
  for (i = 0; i < GACL_PARSE_ATTEMPTS; i++) {
  	gacl_file_ok = access(gacl_file, R_OK);
- 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL from: '%s'", gacl_file);
+ 	char* pwd = (char*) getcwd(NULL, 0);
+ 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL from: '%s', '%s'", gacl_file, pwd);
 		if(gacl_file_ok == 0){
 			acl = GRSTgaclAclLoadFile(gacl_file);
 			if(acl != NULL){
@@ -1016,7 +1018,7 @@ GRSTgaclAcl* load_acl(request_rec *r, char* gacl_file, int nocache)
 		else{
 			// load from file
 			acl = parse_gacl_file(r, gacl_file);
-			ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "updating cached ACL with index");
+			ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "updating cached ACL with index  '%i'", gacl_cache_index);
 			acl_cache_update(r, gacl_file, acl, gacl_cache_index);
 		}
 	}
@@ -1086,19 +1088,35 @@ int check_auth(request_rec *r, int nocache)
 	//client_dn =	"/O=Grid/O=NorduGrid/OU=nbi.dk/CN=Frederik Orellana";
 	client_dn = apr_table_get(subreq->subprocess_env, CLIENT_S_DN_STRING);
 	//client_dn = apr_table_get(r->headers_in, "X-SSL_CLIENT_S_DN");
+
+	if(client_dn == NULL){
+		client_dn = apr_table_get(subreq->subprocess_env, REDIRECT_CLIENT_S_DN_STRING);
+		if(client_dn == NULL){
+			client_dn = "";
+			ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "no client cert: client DN '%s'", client_dn);
+			//return HTTP_UNAUTHORIZED;
+		}
+	}
+	if(client_dn != NULL){
+		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "client DN '%s'", client_dn);
+	}
+
 	if(CLIENT_S_DN_CN_STRING != NULL && strlen(CLIENT_S_DN_CN_STRING) > 0){
-		client_cn = apr_table_get(subreq->subprocess_env, CLIENT_S_DN_CN_STRING);
-		client_dn = strip_off_proxy_cn(r, client_dn, client_cn);
-	 }
+    client_cn = apr_table_get(subreq->subprocess_env, CLIENT_S_DN_CN_STRING);
+    client_dn = strip_off_proxy_cn(r, client_dn, client_cn);
+	}
+	// Debugging: dump all variables
 	//dump_request(subreq);
 	//ap_destroy_sub_req(subreq);
 
-	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "client DN '%s'", client_dn);
-	if(client_dn == NULL){
-		client_dn = "";
-		ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "no client cert: client DN '%s'", client_dn);
-		//return HTTP_UNAUTHORIZED;
-	}
+  /*const apr_array_header_t    *fields;
+  int                         i;
+  apr_table_entry_t           *e = 0;
+  fields = apr_table_elts(r->headers_in);
+  e = (apr_table_entry_t *) fields->elts;
+  for(i = 0; i < fields->nelts; i++) {
+    ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "HEADER %s: %s\n", e[i].key, e[i].val);
+  }*/
 
 	/* chdir to GACL_ROOT or the dir containing the requested file. */
 	if(GACL_ROOT == NULL){
@@ -1135,10 +1153,16 @@ int check_auth(request_rec *r, int nocache)
 		GRSTgaclCredAddValue(usercred, "dn", (char*)client_dn);
 		user = GRSTgaclUserNew(usercred);
 
-		if (acl1 != NULL){
+		if (acl1 == NULL){
+			perm1 = GRST_PERM_NONE;
+		}
+		else{
 			perm1 = GRSTgaclAclTestUser(acl1, user);
 		}
-		if (acl2 != NULL){
+		if (acl2 == NULL){
+			perm2 = GRST_PERM_NONE;
+		}
+		else{
 			perm2 = GRSTgaclAclTestUser(acl2, user);
 		}
 
@@ -1252,8 +1276,8 @@ int gacl_check(request_rec *r)
 		ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "Default permission: %i.", DEFAULT_PERM);
 	}
 
-	/* Continue only if the requested file actually exists. */
-	if(r->method_number == M_GET && access(check_file_path, F_OK) < 0){
+	/* Continue only if the requested file actually exists - or the request is to a db record served by mod_gridfactory. */
+	if(r->method_number == M_GET && access(check_file_path, F_OK) < 0 && strstr(r->uri, "/db/")==NULL){
 		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "File does not exist: %s.", check_file_path);
 		return DECLINED;
 	}
