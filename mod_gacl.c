@@ -189,6 +189,14 @@ static const char* REDIRECT_CLIENT_S_DN_STRING = "REDIRECT_SSL_CLIENT_S_DN";
  * All this is to support proxy certificates.*/
 static const char* CLIENT_S_DN_CN_STRING = "SSL_CLIENT_S_DN_CN";
 
+/*
+ * Header to get client DN from. This is to support reverse proxied setups.
+ * The header must be trusted, i.e. the reverse proxy must set it only if
+ * the client has authenticated and clear it otherwise.
+ */
+
+static const char* CLIENT_S_DN_HEADER_STRING = NULL;
+
 /* This is used for logging by mod_gridsite_log_func */
 static server_rec* this_server = NULL;
 
@@ -239,6 +247,7 @@ typedef struct {
   char* perm_;
   char* root_;
   char* gacldir_;
+  char* dnheader_;
   int timeout_;
   int count_;
   apr_pool_t* pool_;
@@ -323,6 +332,7 @@ dir_config(apr_pool_t* p, char* d)
 	conf->perm_ = 0;			/* null pointer */
 	conf->root_ = 0;			/* null pointer */
 	conf->gacldir_ = 0;			/* null pointer */
+	conf->dnheader_ = 0;			/* null pointer */
 	conf->timeout_ = -1;
 
 	return conf;
@@ -369,6 +379,16 @@ config_gacldir(cmd_parms* cmd, void* mconfig, const char* arg)
 }
 
 static const char*
+config_dnheader(cmd_parms* cmd, void* mconfig, const char* arg)
+{
+	if (((config_rec*)mconfig)->dnheader_)
+		return "DN header already set.";
+
+	((config_rec*)mconfig)->dnheader_ = (char*) arg;
+	return 0;
+}
+
+static const char*
 config_timeout(cmd_parms* cmd, void* mconfig, const char* arg)
 {
 	if (((config_rec*)mconfig)->timeout_ > 0)
@@ -401,6 +421,9 @@ static const command_rec command_table[] = {
 	AP_INIT_TAKE1(
     "GACLDir", config_gacldir, NULL, OR_AUTHCFG,
     "Directory with most accessed .gacl file."),
+	AP_INIT_TAKE1(
+    "DNHeader", config_dnheader, NULL, OR_AUTHCFG,
+    "Trusted header containing client DN."),
 	AP_INIT_TAKE1(
     "VOTimeoutSeconds", config_timeout, NULL, OR_AUTHCFG,
     "Cache timeout for VO lists (dn-lists)."),
@@ -1088,7 +1111,9 @@ int check_auth(request_rec *r, int nocache)
 	//client_dn =	"/O=Grid/O=NorduGrid/OU=nbi.dk/CN=Frederik Orellana";
 	client_dn = apr_table_get(subreq->subprocess_env, CLIENT_S_DN_STRING);
 	//client_dn = apr_table_get(r->headers_in, "X-SSL_CLIENT_S_DN");
-
+	if(client_dn == NULL && CLIENT_S_DN_HEADER_STRING != NULL && strlen(CLIENT_S_DN_HEADER_STRING) > 0){
+		client_dn = apr_table_get(r->headers_in, CLIENT_S_DN_HEADER_STRING);
+	}
 	if(client_dn == NULL){
 		client_dn = apr_table_get(subreq->subprocess_env, REDIRECT_CLIENT_S_DN_STRING);
 		if(client_dn == NULL){
@@ -1097,11 +1122,12 @@ int check_auth(request_rec *r, int nocache)
 			//return HTTP_UNAUTHORIZED;
 		}
 	}
+
 	if(client_dn != NULL){
 		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "client DN '%s'", client_dn);
 	}
 
-	if(CLIENT_S_DN_CN_STRING != NULL && strlen(CLIENT_S_DN_CN_STRING) > 0){
+	if(client_dn != NULL && CLIENT_S_DN_CN_STRING != NULL && strlen(CLIENT_S_DN_CN_STRING) > 0){
     client_cn = apr_table_get(subreq->subprocess_env, CLIENT_S_DN_CN_STRING);
     client_dn = strip_off_proxy_cn(r, client_dn, client_cn);
 	}
