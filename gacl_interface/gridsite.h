@@ -79,12 +79,11 @@
 // No such file or directory
 #define GRST_RET_NO_SUCH_FILE	1003
 
+//#define GRSTerrorLog(GRSTerrorLevel, GRSTerrorFmt, ...) if (GRSTerrorLogFunc != NULL) (GRSTerrorLogFunc)(__FILE__, __LINE__, GRSTerrorLevel, GRSTerrorFmt, __VA_ARGS__)
 
-// #define GRSTerrorLog(GRSTerrorLevel, GRSTerrorFmt, ...) if (GRSTerrorLogFunc != NULL) (GRSTerrorLogFunc)(__FILE__, __LINE__, GRSTerrorLevel, GRSTerrorFmt, __VA_ARGS__)
+#define GRSTerrorLog(GRSTerrorLevel, GRSTerrorFmt, ...) if (GRSTerrorLogFunc != NULL) (GRSTerrorLogFunc)(__FILE__, __LINE__, GRSTerrorLevel, GRSTerrorFmt, ##__VA_ARGS__)
 
-#define GRSTerrorLog(GRSTerrorLevel, ...) if (GRSTerrorLogFunc != NULL) (GRSTerrorLogFunc)(__FILE__, __LINE__, GRSTerrorLevel, __VA_ARGS__)
-
-void (*GRSTerrorLogFunc)(char *, int, int, char *, ...);
+void GRSTerrorLogFunc(char *, int, int, char *, ...);
 
 /* these levels are the same as Unix syslog() and Apache ap_log_error() */
 
@@ -100,6 +99,7 @@ void (*GRSTerrorLogFunc)(char *, int, int, char *, ...);
 #define GRST_MAX_TIME_T	 INT32_MAX
 
 typedef struct { char                      *auri;
+                 char                      *ruri;
                  int			    delegation;
                  int			    nist_loa;
                  time_t			    notbefore;
@@ -348,9 +348,9 @@ int       GRSTgaclUserLoadDNlists(GRSTgaclUser *, char *);
 GRSTgaclCred *GRSTgaclUserFindCredtype(GRSTgaclUser *, char *);
 
 //__attribute__ ((deprecated))
-int GRSTgaclDNlistHasUser(char *, GRSTgaclUser *);
+int GRSTgaclDNlistHasUser(GRSTgaclCred *, GRSTgaclUser *);
 
-int GRSTgaclUserHasAURI(GRSTgaclUser *, char *);
+int GRSTgaclUserHasAURI(GRSTgaclUser *, GRSTgaclCred *);
 
 /*  #define GACLtestUserAcl(x,y)	GRSTgaclAclTestUser((x),(y)) */
 GRSTgaclPerm   GRSTgaclAclTestUser(GRSTgaclAcl *, GRSTgaclUser *);

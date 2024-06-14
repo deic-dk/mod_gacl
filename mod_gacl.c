@@ -189,15 +189,7 @@ static const char* REDIRECT_CLIENT_S_DN_STRING = "REDIRECT_SSL_CLIENT_S_DN";
  * All this is to support proxy certificates.*/
 static const char* CLIENT_S_DN_CN_STRING = "SSL_CLIENT_S_DN_CN";
 
-/*
- * Header to get client DN from. This is to support reverse proxied setups.
- * The header must be trusted, i.e. the reverse proxy must set it only if
- * the client has authenticated and clear it otherwise.
- */
-
-static const char* CLIENT_S_DN_HEADER_STRING = NULL;
-
-/* This is used for logging by mod_gridsite_log_func */
+/* This is used for logging by GRSTerrorLogFunc */
 static server_rec* this_server = NULL;
 
 /* Default permission when no .gacl file present in directory - overridden by DefaultPermission */
@@ -217,10 +209,10 @@ static unsigned int MAX_RECURSE = 10;
 
 /* Number of attempts to parse a GACL file - failures will usually be due to
  * another apache process parsing the same GACL file at the same time */
-static unsigned int GACL_PARSE_ATTEMPTS = 10;
+static unsigned int GACL_PARSE_ATTEMPTS = 3;
 
 /* Number of seconds between each parse attempt */
-static unsigned int GACL_PARSE_INTERVAL = 10;
+static unsigned int GACL_PARSE_INTERVAL = 1;
 
 /* Number of ACLs cached in memory */
 unsigned int ACL_CACHE_SIZE = 200;
@@ -247,7 +239,8 @@ typedef struct {
   char* perm_;
   char* root_;
   char* gacldir_;
-  char* dnheader_;
+  const char* dnheader_;
+  char* onlyfrom_;
   int timeout_;
   int count_;
   apr_pool_t* pool_;
@@ -333,22 +326,24 @@ dir_config(apr_pool_t* p, char* d)
 	conf->root_ = 0;			/* null pointer */
 	conf->gacldir_ = 0;			/* null pointer */
 	conf->dnheader_ = 0;			/* null pointer */
+	conf->onlyfrom_ = 0;			/* null pointer */
 	conf->timeout_ = -1;
 
 	return conf;
 }
 
-static const char*
+const char*
 config_path(cmd_parms* cmd, void* mconfig, const char* arg)
 {
-	if (((config_rec*)mconfig)->path_)
+	if (((config_rec*)mconfig)->path_) {
 		return "Path to the script already set.";
+	}
 
 	((config_rec*)mconfig)->path_ = ap_server_root_relative(cmd->pool, arg);
 	return 0;
 }
 
-static const char*
+const char*
 config_perm(cmd_parms* cmd, void* mconfig, const char* arg)
 {
 	if (((config_rec*)mconfig)->perm_)
@@ -358,7 +353,7 @@ config_perm(cmd_parms* cmd, void* mconfig, const char* arg)
 	return 0;
 }
 
-static const char*
+const char*
 config_root(cmd_parms* cmd, void* mconfig, const char* arg)
 {
 	if (((config_rec*)mconfig)->root_)
@@ -368,7 +363,7 @@ config_root(cmd_parms* cmd, void* mconfig, const char* arg)
 	return 0;
 }
 
-static const char*
+const char*
 config_gacldir(cmd_parms* cmd, void* mconfig, const char* arg)
 {
 	if (((config_rec*)mconfig)->gacldir_)
@@ -378,7 +373,13 @@ config_gacldir(cmd_parms* cmd, void* mconfig, const char* arg)
 	return 0;
 }
 
-static const char*
+/*
+ * Header to get client DN from. This is to support reverse proxied setups.
+ * The header must be trusted, i.e. the reverse proxy must set it only if
+ * the client has authenticated and clear it otherwise.
+ */
+
+const char*
 config_dnheader(cmd_parms* cmd, void* mconfig, const char* arg)
 {
 	if (((config_rec*)mconfig)->dnheader_)
@@ -388,7 +389,17 @@ config_dnheader(cmd_parms* cmd, void* mconfig, const char* arg)
 	return 0;
 }
 
-static const char*
+const char*
+config_onlyfrom(cmd_parms* cmd, void* mconfig, const char* arg)
+{
+	if (((config_rec*)mconfig)->onlyfrom_)
+		return "OnlyFrom IP already set.";
+
+	((config_rec*)mconfig)->onlyfrom_ = (char*) arg;
+	return 0;
+}
+
+const char*
 config_timeout(cmd_parms* cmd, void* mconfig, const char* arg)
 {
 	if (((config_rec*)mconfig)->timeout_ > 0)
@@ -398,7 +409,7 @@ config_timeout(cmd_parms* cmd, void* mconfig, const char* arg)
 	return 0;
 }
 
-static const char*
+const char*
 config_cachesize(cmd_parms* cmd, void* mconfig, const char* arg)
 {
 	if (((config_rec*)mconfig)->cachesize_ > 0)
@@ -424,6 +435,9 @@ static const command_rec command_table[] = {
 	AP_INIT_TAKE1(
     "DNHeader", config_dnheader, NULL, OR_AUTHCFG,
     "Trusted header containing client DN."),
+	AP_INIT_TAKE1(
+    "OnlyFrom", config_onlyfrom, NULL, OR_AUTHCFG,
+    "IP address of host from where DNHeader authentication will be accepted."),
 	AP_INIT_TAKE1(
     "VOTimeoutSeconds", config_timeout, NULL, OR_AUTHCFG,
     "Cache timeout for VO lists (dn-lists)."),
@@ -521,10 +535,14 @@ static int get_perm(char* perm){
 	return ret;
 }
 
-static void mod_gridsite_log_func(char *file, int line, int level,
-                                                    char *fmt, ...)
+void GRSTerrorLogFunc(char *file, int line, int level, char *fmt, ...)
 {
-	ap_log_error(MY_MARK, APLOG_INFO, 0, this_server, fmt, file);
+	va_list args;
+	va_start(args, *fmt);
+	// This does not work, as ap_log_error does not accept a variadic last argument,
+	// so only fmt is logged.
+	ap_log_error(MY_MARK, level, 0, this_server, fmt, args);
+	va_end(args);
 }
 
 /**
@@ -609,7 +627,7 @@ char* get_path(request_rec *r, char* req_fil)
 	else{
 		pwd = ap_make_dirstr_parent(r->pool, req_fil);
   }
-	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "Path: '%s'", pwd);
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "path: '%s'", pwd);
 	return pwd;
 }
 
@@ -1016,7 +1034,7 @@ void acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int 
 	rv = apr_thread_mutex_unlock(module_conf->mutex_);
 	if (rv != APR_SUCCESS) {
 	// Something is seriously wrong.	We need to log it, but it doesn't - of itself - invalidate this request.
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r, "Failed to release thread mutex");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r, "failed to release thread mutex");
 	}
 #endif
 
@@ -1058,7 +1076,6 @@ int check_auth(request_rec *r, int nocache)
 	GRSTgaclAcl *acl1, *acl2;
 	GRSTgaclPerm perm0, perm1, perm2;
 	request_rec* subreq;
-	GRSTerrorLogFunc = mod_gridsite_log_func;
 	GRSTgaclCred* usercred;
 	GRSTgaclUser	*user;
 	char* req_fil;
@@ -1091,9 +1108,9 @@ int check_auth(request_rec *r, int nocache)
 
 	/* Continue only if the requested file actually exists. */
 	if(r->method_number == M_GET && access(check_file_path, F_OK) < 0){
-		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "No such file '%s'", check_file_path);
+		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "no such file '%s'", check_file_path);
 		if(((DEFAULT_PERM & perm0 ) != 0)){
-			ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
+			ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "ok");
 			return OK;
 		}
 		else{
@@ -1111,8 +1128,12 @@ int check_auth(request_rec *r, int nocache)
 	//client_dn =	"/O=Grid/O=NorduGrid/OU=nbi.dk/CN=Frederik Orellana";
 	client_dn = apr_table_get(subreq->subprocess_env, CLIENT_S_DN_STRING);
 	//client_dn = apr_table_get(r->headers_in, "X-SSL_CLIENT_S_DN");
-	if(client_dn == NULL && CLIENT_S_DN_HEADER_STRING != NULL && strlen(CLIENT_S_DN_HEADER_STRING) > 0){
-		client_dn = apr_table_get(r->headers_in, CLIENT_S_DN_HEADER_STRING);
+
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "matching ip from header %s: %s <-> %s --> %s", conf->dnheader_, r->connection->client_ip, conf->onlyfrom_, apr_table_get(r->headers_in, "SSL-CLIENT-DN"));
+	if(client_dn == NULL && conf->dnheader_ != NULL && strlen(conf->dnheader_) > 0 &&
+			conf->onlyfrom_ != NULL && strlen(conf->onlyfrom_) > 0 &&
+			strcmp(r->connection->client_ip, conf->onlyfrom_) == 0){
+		client_dn = apr_table_get(r->headers_in, conf->dnheader_);
 	}
 	if(client_dn == NULL){
 		client_dn = apr_table_get(subreq->subprocess_env, REDIRECT_CLIENT_S_DN_STRING);
@@ -1169,7 +1190,7 @@ int check_auth(request_rec *r, int nocache)
 	acl1 = load_acl(r, (char*)GACL_FILE, nocache);
 	acl2 = load_acl(r, (char*)GACL_VO_FILE, nocache);
 
-	/* If gacl file(s) were found, check permissions, otherwise carry on and stick with defaults. */
+	/* If gacl file(s) were found, check permissions. */
 	perm1 = DEFAULT_PERM;
 	perm2 = DEFAULT_PERM;
 	if (acl1 != NULL || acl2 != NULL) {
@@ -1198,24 +1219,24 @@ int check_auth(request_rec *r, int nocache)
 	 * Now check if the action is permitted.
 	 */
 
-	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "PERM1: '%i'", perm1);
-	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "PERM2: '%i'", perm2);
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "perm1: '%i'", perm1);
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "perm2: '%i'", perm2);
 
 	/* This means that one of the files existed but could not be read and parsed; better back off. */
 	if(perm1 < 0 || perm2 < 0){
 		return HTTP_UNAUTHORIZED;
 	}
 
-	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "PERM0: '%i'", perm0);
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "perm0: '%i'", perm0);
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "(perm1 & perm0 ): '%i'", (perm1 & perm0 ));
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "(perm2 & perm0 ): '%i'", (perm2 & perm0 ));
 
-	if((acl1 != NULL) && ((perm1 & perm0 ) != 0)){
-		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
+	if(/*(acl1 != NULL) &&*/ ((perm1 & perm0 ) != 0)){
+		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "ok");
 		return OK;
 	}
-	if((acl2 != NULL) && ((perm2 & perm0 ) != 0)){
-		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "OK");
+	if(/*(acl2 != NULL) &&*/ ((perm2 & perm0 ) != 0)){
+		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "ok");
 		return OK;
 	}
 
@@ -1294,17 +1315,17 @@ int gacl_check(request_rec *r)
 	}
 
 	if (conf->perm_ == NULL) {
-		ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "Default permission not configured.");
+		ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "default permission not configured.");
 		/* Default permission not configured properly; leaving DEFAULT_PERM as it is. */
 	}
 	else{
 		DEFAULT_PERM = get_perm(conf->perm_);
-		ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "Default permission: %i.", DEFAULT_PERM);
+		ap_log_rerror(MY_MARK, APLOG_DEBUG, 0, r, "default permission: %i.", DEFAULT_PERM);
 	}
 
 	/* Continue only if the requested file actually exists - or the request is to a db record served by mod_gridfactory. */
 	if(r->method_number == M_GET && access(check_file_path, F_OK) < 0 && strstr(r->uri, "/db/")==NULL){
-		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "File does not exist: %s.", check_file_path);
+		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file does not exist: %s.", check_file_path);
 		return DECLINED;
 	}
 
@@ -1318,7 +1339,7 @@ int gacl_check(request_rec *r)
 	}
 
 	/* Run sync script only if last check was done longer ago than VO_TIMEOUT_SECONDS */
-	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "File to check '%s'.", check_file_path);
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file to check '%s'.", check_file_path);
 	dir = get_path(r, check_file_path);
 	find_gacl_file(r, dir);
 	pwd = (char*) getcwd(NULL, 0);

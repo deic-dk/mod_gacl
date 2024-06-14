@@ -43,6 +43,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <ctype.h>
+#include <assert.h>
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -126,6 +127,7 @@ GRSTgaclCred *GRSTgaclCredCreate(char *auri_prefix, char *auri_suffix)
     }
 
   newcred->auri       = auri;
+  newcred->ruri       = NULL;
   newcred->delegation = 0;
   newcred->nist_loa   = 0;
   newcred->notbefore  = 0;
@@ -169,6 +171,8 @@ int GRSTgaclCredAddValue(GRSTgaclCred *cred, char *name, char *rawvalue)
   if ((cred == NULL) || (cred->auri == NULL)) return 0;
   free(cred->auri);
   cred->auri = NULL;
+  free(cred->ruri);
+  cred->ruri = NULL;
 
   /* no leading or trailing space in value */
 
@@ -179,6 +183,7 @@ int GRSTgaclCredAddValue(GRSTgaclCred *cred, char *name, char *rawvalue)
   for (i=strlen(value) - 1; (i >= 0) && isspace(value[i]); --i) value[i]='\0';
 
   encoded_value = GRSThttpUrlMildencode(value);
+  asprintf(&(cred->ruri), "%s", value);
 
   if (strcmp(name, "dn") == 0)
     {
@@ -230,6 +235,7 @@ int GRSTgaclCredFree(GRSTgaclCred *cred)
   if (cred == NULL) return 1;
 
   if (cred->auri != NULL) free(cred->auri);
+  if (cred->ruri != NULL) free(cred->ruri);
   free(cred);
 
   return 1;
@@ -340,6 +346,195 @@ int GRSTgaclCredPrint(GRSTgaclCred *cred, FILE *fp)
   return 0;
 }
 
+// From https://stackoverflow.com/questions/9210528/split-string-with-delimiters-in-c
+char** str_split(char* a_str, const char a_delim)
+{
+
+	GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclCmp splitting");
+	GRSTerrorLog(GRST_LOG_DEBUG, a_str);
+
+    char** result    = 0;
+    size_t count     = 0;
+    char* tmp        = a_str;
+    char* last_comma = 0;
+    char delim[2];
+    delim[0] = a_delim;
+    delim[1] = 0;
+
+    /* Count how many elements will be extracted. */
+    while (*tmp)
+    {
+        if (a_delim == *tmp)
+        {
+            count++;
+            last_comma = tmp;
+        }
+        tmp++;
+    }
+    /* Add space for trailing token. */
+    count += last_comma < (a_str + strlen(a_str) - 1);
+    /* Add space for terminating null string so caller
+       knows where the list of returned strings ends. */
+    count++;
+    result = malloc(sizeof(char*) * count);
+    if (result)
+    {
+        size_t idx  = 0;
+        char* token = strtok(a_str, delim);
+        while (token && idx < count)
+        {
+            *(result + idx++) = strdup(token);
+            token = strtok(0, delim);
+        }
+        assert(idx == count - 1);
+        *(result + idx) = 0;
+    }
+
+    return result;
+}
+
+// From https://stackoverflow.com/questions/60891646/trim-leading-and-trailing-whitespace-from-string-in-c
+char* trim(char *s) {
+  char *start, *end;
+
+  int length = strlen(s);
+  start = s;
+  end = s + length - 1;
+
+  while (1) {
+    if (*start == ' ' || *start == '\t' || *start == '\n') {
+      start++;
+    } else {
+      break;
+    }
+  }
+
+  while (1) {
+    if (*end == ' ' || *end == '\t' || *end == '\n') {
+      end--;
+    } else {
+      break;
+    }
+  }
+
+  char temp[length + 1];
+  int index = 0;
+
+  while (start <= end) {
+    temp[index++] = *start;
+    start++;
+  }
+
+  temp[index] = '\0';
+
+  char *result = malloc(strlen(temp) + 1);
+  if (result == NULL)  // check if malloc failed
+    return NULL;
+
+  strcpy(result, temp);
+  return result;
+}
+
+int GRSTgaclCmp(char *dn1, char *dn2){
+	/* Compare fields of two DN strings - e.g. "CN=test,O=dtu.dk" and "O=sdu.dk,CN=testuser"*/
+	/*if(strcmp(dn1, dn2) == 0){
+		return 0;
+	}*/
+	int maxchars = 256;
+	int i;
+	int j;
+	// Count number of commas in each string
+	int numc1 = 0;
+	int numc2 = 0;
+	for (i=0, numc1=0; dn1[i]; i++)
+		numc1 += (dn1[i] == ',');
+	for (j=0, numc2=0; dn2[j]; j++)
+		numc2 += (dn2[j] == ',');
+	GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclCmp tokenizing");
+	// Tokenize and copy to arrays
+	char** tokens1 = str_split(dn1, ',');
+	char *els1[numc1+1];
+	*els1 = malloc((numc1+1) * maxchars * sizeof(char*));
+	if (numc1 == 0) {
+		els1[0] = malloc(maxchars * sizeof(char));
+		strcpy(els1[0], *(tokens1));
+		GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclCmp assigned");
+		GRSTerrorLog(GRST_LOG_DEBUG, els1[0]);
+	}
+	else {
+		for (i = 0; *(tokens1 + i); i++)
+		{
+			els1[i] = malloc(maxchars * sizeof(char));
+			strcpy(els1[i], *(tokens1 + i));
+			GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclCmp assigned");
+			GRSTerrorLog(GRST_LOG_DEBUG, els1[i]);
+			free(*(tokens1 + i));
+		}
+	}
+	free(tokens1);
+	char** tokens2 = str_split(dn2, ',');
+	char *els2[numc2+1];
+	*els2 = malloc((numc2+1) * maxchars * sizeof(char*));
+	if (numc2 == 0) {
+		els2[0] = malloc(maxchars * sizeof(char));
+		strcpy(els2[0], *(tokens2));
+	}
+	else {
+		for (j = 0; *(tokens2 + j); j++)
+		{
+			els2[i] = malloc(maxchars * sizeof(char));
+			strcpy(els2[j], *(tokens2 + j));
+			free(*(tokens2 + j));
+		}
+	}
+	free(tokens2);
+	// Compare
+	int ok = 1;
+	for (i = 0; i<numc1+1; i++)
+	{
+		ok = 1;
+		for (j = 0; j<numc2+1; j++)
+		{
+			char* tmp1 = trim(els1[i]);
+			char* tmp2 = trim(els2[j]);
+			GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclCmp matching");
+			GRSTerrorLog(GRST_LOG_DEBUG, tmp1);
+			GRSTerrorLog(GRST_LOG_DEBUG, tmp2);
+			if (strcmp(tmp1, tmp2) == 0) {
+				ok = 0;
+				GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclCmp hit");
+				free(tmp1);
+				free(tmp2);
+				break;
+			}
+			else{
+				free(tmp1);
+				free(tmp2);
+			}
+		}
+		if (ok == 1) {
+			break;
+		}
+	}
+	if ( els1 != NULL ) {
+		// causes segfault
+		/*for (i = 0; i<numc1+1; i++)
+		{
+			free(els1[i]);
+		}*/
+		free(*els1);
+	}
+	if ( els2 != NULL ) {
+		/*for (j = 0; j<numc2+1; j++)
+		{
+			free(els2[j]);
+		}*/
+		free(*els2);
+	}
+	return ok;
+}
+
+// Apparently not used - FO
 int GRSTgaclCredCmpAuri(GRSTgaclCred *cred1, GRSTgaclCred *cred2)
 /*
     GRSTgaclCredCmp - compare two credentials for exact match in AURI values
@@ -358,7 +553,12 @@ int GRSTgaclCredCmpAuri(GRSTgaclCred *cred1, GRSTgaclCred *cred2)
 
   if (cred2->auri == NULL) return 1;
 
-  return strcmp(cred1->auri, cred2->auri);
+  if(strcmp(cred1->auri, cred2->auri) == 0 ||
+      ( strncmp(cred1->auri, "dn:", 3) == 0 && strncmp(cred2->auri, "dn:", 3) == 0 &&
+      GRSTgaclCmp(cred1->auri, cred2->auri )) == 0){
+    return 0;
+  }
+  return 1;
 }
 
 /*                                              *
@@ -1024,23 +1224,42 @@ int GRSTgaclUserHasCred(GRSTgaclUser *user, GRSTgaclCred *cred)
             (strncmp(crediter->auri, "dn:", 3) == 0) &&
             (crediter->nist_loa >= nist_loa)) return 1;
 
-      return 0;    
+      return 0;
     }
 
 /*
 // can remove this once we preload DN Lists etc as AURIs?
   if ((strncmp(cred->auri, "http:",  5) == 0) ||
       (strncmp(cred->auri, "https:", 6) == 0))
-    {      
-      return GRSTgaclDNlistHasUser(cred->auri, user);
+    {
+      return GRSTgaclDNlistHasUser(cred, user);
     }
 */
   /* generic AURI = AURI test */
 
-  for (crediter=user->firstcred; crediter != NULL; crediter = crediter->next)
-     if ((crediter->auri != NULL) &&
+  for (crediter=user->firstcred; crediter != NULL; crediter = crediter->next){
+    GRSTerrorLog(GRST_LOG_INFO, "GRSTgaclCmp comparing");
+    GRSTerrorLog(GRST_LOG_INFO, crediter->ruri);
+    GRSTerrorLog(GRST_LOG_INFO, cred->ruri);
+    if ((crediter->ruri != NULL) &&
          (strcmp(crediter->auri, cred->auri) == 0)) return 1;
-
+    char *crediterDN;
+    char *credDN;
+    if ( strncmp(crediter->auri, "dn:", 3) == 0 && strncmp(cred->auri, "dn:", 3) == 0 &&
+        crediter->ruri != NULL && cred->ruri != NULL &&
+        strlen(crediter->ruri) > 0 && strlen(cred->ruri) > 0 ) {
+      crediterDN = strdup(crediter->ruri);
+      credDN = strdup(cred->ruri);
+      int res = GRSTgaclCmp(crediterDN, credDN);
+      free(crediterDN);
+      free(credDN);
+      if (res == 0) {
+        GRSTerrorLog(GRST_LOG_INFO, "GRSTgaclCmp match");
+        return 1;
+      }
+    }
+  }
+	GRSTerrorLog(GRST_LOG_INFO, "GRSTgaclCmp no match");
   return 0;
 }
 
@@ -1177,8 +1396,8 @@ static void recurse4dnlists(GRSTgaclUser *user, char *dir,
          if (fd < 0) close(fd);
          free(fullfilename);
        }
-  
-  closedir(dirDIR);  
+
+  closedir(dirDIR);
 }
 
 int GRSTgaclUserLoadDNlists(GRSTgaclUser *user, char *dnlists)
@@ -1275,20 +1494,24 @@ static char *recurse4file(char *dir, char *file, int recurse_level)
 }
 #endif
 
-int GRSTgaclDNlistHasUser(char *listurl, GRSTgaclUser *user)
+int GRSTgaclDNlistHasUser(GRSTgaclCred *cred, GRSTgaclUser *user)
 {
-  return GRSTgaclUserHasAURI(user, listurl);
+  return GRSTgaclUserHasAURI(user, cred);
 }
 
-int GRSTgaclUserHasAURI(GRSTgaclUser *user, char *auri)
+int GRSTgaclUserHasAURI(GRSTgaclUser *user, GRSTgaclCred *cr)
 {
   GRSTgaclCred *cred;
 
-  if ((auri == NULL) || (user == NULL)) return 0;
+  if ((cr->auri == NULL) || (user == NULL)) return 0;
 
   for (cred = user->firstcred; cred != NULL; cred = cred->next)
      {
-       if (strcmp(auri, cred->auri) == 0) return 1;
+       if (strcmp(cr->auri, cred->auri) == 0 ||
+       (strncmp(cr->auri, "dn:", 3) == 0 && strncmp(cred->auri, "dn:", 3) == 0 &&
+           GRSTgaclCmp(cr->ruri, cred->ruri) == 0)) {
+           return 1;
+       }
      }
 
   return 0;
@@ -1315,9 +1538,14 @@ GRSTgaclPerm GRSTgaclAclTestUser(GRSTgaclAcl *acl, GRSTgaclUser *user)
 
        /* now go through creds, checking they all do apply to us */
 
-       for (cred = entry->firstcred; cred != NULL; cred = cred->next)
-             if (!GRSTgaclUserHasCred(user, cred)) flag = 0;
-             else if (strcmp(cred->auri, "gacl:any-user") != 0) onlyanyuser = 0;
+       for (cred = entry->firstcred; cred != NULL; cred = cred->next) {
+             if (flag && !GRSTgaclUserHasCred(user, cred)) {
+            	 flag = 0;
+             }
+             if (strcmp(cred->auri, "gacl:any-user") != 0) {
+            	 onlyanyuser = 0;
+             }
+       }
 
        if (!flag) continue; /* flag false if a subtest failed */
 
