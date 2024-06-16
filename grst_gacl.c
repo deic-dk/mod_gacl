@@ -1248,6 +1248,13 @@ int GRSTgaclUserHasCred(GRSTgaclUser *user, GRSTgaclCred *cred)
     if ( strncmp(crediter->auri, "dn:", 3) == 0 && strncmp(cred->auri, "dn:", 3) == 0 &&
         crediter->ruri != NULL && cred->ruri != NULL &&
         strlen(crediter->ruri) > 0 && strlen(cred->ruri) > 0 ) {
+      // Notice that we allow assigning read, admin permissions to dn:anyone.
+      // This is in contrast to any-user.
+      // Notice also that "anyone" is anyone _who has authenticated_, i.e. who has
+    	// crediter->ruri set.
+      if (strcmp(cred->ruri, "anyone") == 0 ) {
+        return 1;
+      }
       crediterDN = strdup(crediter->ruri);
       credDN = strdup(cred->ruri);
       int res = GRSTgaclCmp(crediterDN, credDN);
