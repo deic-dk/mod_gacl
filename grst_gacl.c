@@ -8,11 +8,11 @@
 
      o Redistributions of source code must retain the above
        copyright notice, this list of conditions and the following
-       disclaimer. 
+       disclaimer.
      o Redistributions in binary form must reproduce the above
        copyright notice, this list of conditions and the following
        disclaimer in the documentation and/or other materials
-       provided with the distribution. 
+       provided with the distribution.
 
    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
    CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
@@ -59,7 +59,7 @@
 /*                                                                      *
  * Global variables, shared by all GACL functions but private to libgacl *
  *                                                                      */
- 
+
 char     *grst_perm_syms[] =  { "none",
                                 "read",
                                 "exec",
@@ -104,7 +104,7 @@ GRSTgaclCred *GRSTgaclCredCreate(char *auri_prefix, char *auri_suffix)
 {
   int           i;
   char         *auri;
-  GRSTgaclCred *newcred; 
+  GRSTgaclCred *newcred;
 
   if      ((auri_prefix != NULL) && (auri_suffix == NULL))
    auri = strdup(auri_prefix);
@@ -120,7 +120,7 @@ GRSTgaclCred *GRSTgaclCredCreate(char *auri_prefix, char *auri_suffix)
                                            auri[i]='\0'; /* trailing space */
 
   newcred = malloc(sizeof(GRSTgaclCred));
-  if (newcred == NULL) 
+  if (newcred == NULL)
     {
       free(auri);
       return NULL;
@@ -144,17 +144,17 @@ GRSTgaclCred *GRSTgaclCredNew(char *type)
 */
 {
   if (type == NULL) return NULL;
-  
+
   if ((strcmp(type, "person" ) == 0) ||
       (strcmp(type, "voms"   ) == 0) ||
       (strcmp(type, "dn-list") == 0) ||
       (strcmp(type, "dns"    ) == 0) ||
       (strcmp(type, "level"  ) == 0)) return GRSTgaclCredCreate("", NULL);
 
-  if (strcmp(type, "any-user") == 0) 
+  if (strcmp(type, "any-user") == 0)
        return GRSTgaclCredCreate("gacl:", "any-user");
 
-  if (strcmp(type, "auth-user") == 0) 
+  if (strcmp(type, "auth-user") == 0)
        return GRSTgaclCredCreate("gacl:", "auth-user");
 
   return NULL;
@@ -176,7 +176,7 @@ int GRSTgaclCredAddValue(GRSTgaclCred *cred, char *name, char *rawvalue)
 
   /* no leading or trailing space in value */
 
-  value = rawvalue; 
+  value = rawvalue;
   while ((*value != '\0') && isspace(*value)) ++value;
 
   value = strdup(value);
@@ -221,14 +221,14 @@ int GRSTgaclCredAddValue(GRSTgaclCred *cred, char *name, char *rawvalue)
       return 1;
     }
 
-  free(value);  
+  free(value);
   free(encoded_value);
   return 0;
 }
 
 int GRSTgaclCredFree(GRSTgaclCred *cred)
 /*
-    GRSTgaclCredFree - free memory structures of a GRSTgaclCred, 
+    GRSTgaclCredFree - free memory structures of a GRSTgaclCred,
     returning 1 always!
 */
 {
@@ -254,7 +254,7 @@ static int GRSTgaclCredsFree(GRSTgaclCred *firstcred)
 }
 
 static int GRSTgaclCredInsert(GRSTgaclCred *firstcred, GRSTgaclCred *newcred)
-/* 
+/*
     GRSTgaclCredInsert - insert a cred in the *next chain of firstcred
 
     FOR THE MOMENT THIS JUST APPENDS!
@@ -268,18 +268,18 @@ static int GRSTgaclCredInsert(GRSTgaclCred *firstcred, GRSTgaclCred *newcred)
       return 1;
     }
 
-  return GRSTgaclCredInsert(firstcred->next, newcred);     
+  return GRSTgaclCredInsert(firstcred->next, newcred);
 }
 
 int GRSTgaclEntryAddCred(GRSTgaclEntry *entry, GRSTgaclCred *cred)
-/*  
+/*
     GRSTaddCred - add a new credential to an existing entry, returning 1
-    on success or 0 on error 
-*/ 
+    on success or 0 on error
+*/
 {
   if (entry == NULL) return 0;
- 
-  if (entry->firstcred == NULL) 
+
+  if (entry->firstcred == NULL)
     {
       entry->firstcred = cred;
       return 1;
@@ -288,7 +288,7 @@ int GRSTgaclEntryAddCred(GRSTgaclEntry *entry, GRSTgaclCred *cred)
 }
 
 static int GRSTgaclCredRemoveCred(GRSTgaclCred *firstcred, GRSTgaclCred *oldcred)
-/* 
+/*
     (Private)
 
     GRSTgaclCredRemoveCred - remove a cred in the *next chain of firstcred
@@ -301,10 +301,10 @@ static int GRSTgaclCredRemoveCred(GRSTgaclCred *firstcred, GRSTgaclCred *oldcred
 }
 
 int GRSTgaclEntryDelCred(GRSTgaclEntry *entry, GRSTgaclCred *cred)
-/*  
+/*
     GRSTgaclEntryDelCred - remove a new cred from an entry, returning 1
     on success (or absense) or 0 on error.
-*/ 
+*/
 {
   if (entry == NULL) return 0;
 
@@ -312,7 +312,7 @@ int GRSTgaclEntryDelCred(GRSTgaclEntry *entry, GRSTgaclCred *cred)
 }
 
 int GRSTgaclCredPrint(GRSTgaclCred *cred, FILE *fp)
-/* 
+/*
    GRSTgaclCredPrint - print a credential and the AURI value it contains
 */
 {
@@ -332,10 +332,10 @@ int GRSTgaclCredPrint(GRSTgaclCred *cred, FILE *fp)
 
       fprintf(fp, "</auri>\n");
 
-      if (cred->nist_loa > 0) 
+      if (cred->nist_loa > 0)
             fprintf(fp, "<nist-loa>%d</nist-loa>\n", cred->nist_loa);
 
-      if (cred->delegation > 0) 
+      if (cred->delegation > 0)
             fprintf(fp, "<delegation>%d</delegation>\n", cred->delegation);
 
       fprintf(fp, "</cred>\n");
@@ -585,7 +585,7 @@ GRSTgaclEntry *GRSTgaclEntryNew(void)
 }
 
 int GRSTgaclEntryFree(GRSTgaclEntry *entry)
-/* 
+/*
     GRSTgaclEntryFree - free up space used by an entry (always returns 1)
 */
 {
@@ -593,7 +593,7 @@ int GRSTgaclEntryFree(GRSTgaclEntry *entry)
 
   if (entry == NULL) return 1;
 
-  GRSTgaclCredsFree(entry->firstcred);  
+  GRSTgaclCredsFree(entry->firstcred);
 
   free(entry);
 
@@ -602,45 +602,45 @@ int GRSTgaclEntryFree(GRSTgaclEntry *entry)
 
 static int GRSTgaclEntriesFree(GRSTgaclEntry *entry)
 /*
-    GRSTgaclEntriesFree - free up entry and all entries linked to in its *next 
+    GRSTgaclEntriesFree - free up entry and all entries linked to in its *next
                       chain
 */
 {
   if (entry == NULL) return 0;
-  
+
   if (entry->next != NULL) GRSTgaclEntriesFree(entry->next);
-  
-  return GRSTgaclEntryFree(entry);  
+
+  return GRSTgaclEntryFree(entry);
 }
 
 static int GRSTgaclEntryInsert(GRSTgaclEntry *firstentry, GRSTgaclEntry *newentry)
-/* 
+/*
     GRSTgaclEntryInsert - insert an entry in the *next chain of firstentry
 
     FOR THE MOMENT THIS JUST APPENDS
 */
 {
   if (firstentry == NULL) return 0;
-  
+
   if (firstentry->next == NULL)
     {
       firstentry->next = newentry;
       return 1;
     }
 
-  return GRSTgaclEntryInsert(firstentry->next, newentry);     
+  return GRSTgaclEntryInsert(firstentry->next, newentry);
 }
 
 int GRSTgaclAclAddEntry(GRSTgaclAcl *acl, GRSTgaclEntry *entry)
-/*  
+/*
     GRSTgaclAclAddEntry - add a new entry to an existing acl, returning 1
-    on success or 0 on error 
-*/ 
+    on success or 0 on error
+*/
 {
   if (acl == NULL) return 0;
 
-  if (acl->firstentry == NULL) 
-    { 
+  if (acl->firstentry == NULL)
+    {
       acl->firstentry = entry;
       return 1;
     }
@@ -653,7 +653,7 @@ int GRSTgaclEntryPrint(GRSTgaclEntry *entry, FILE *fp)
   GRSTgaclPerm  i;
 
   fputs("<entry>\n", fp);
-  
+
   for (cred = entry->firstcred; cred != NULL; cred = cred->next)
                                             GRSTgaclCredPrint(cred, fp);
 
@@ -692,7 +692,7 @@ int GRSTgaclPermPrint(GRSTgaclPerm perm, FILE *fp)
   GRSTgaclPerm i;
 
   for (i=GRST_PERM_READ; grst_perm_syms[i] != NULL; ++i)
-       if (perm == grst_perm_vals[i]) 
+       if (perm == grst_perm_vals[i])
          {
            fprintf(fp, "<%s/>", grst_perm_syms[i]);
            return 1;
@@ -737,7 +737,7 @@ char *GRSTgaclPermToChar(GRSTgaclPerm perm)
 {
   char      *p = NULL;
   GRSTgaclPerm  i;
-  
+
   for (i=0; grst_perm_syms[i] != NULL; ++i)
        if (perm & grst_perm_vals[i]) p = grst_perm_syms[i];
 
@@ -754,7 +754,7 @@ GRSTgaclPerm GRSTgaclPermFromChar(char *s)
   for (i=0; grst_perm_syms[i] != NULL; ++i)
        if (strcasecmp(grst_perm_syms[i], s) == 0) return grst_perm_vals[i];
 
-  return -1; 
+  return -1;
 }
 
 /*                                            *
@@ -762,8 +762,8 @@ GRSTgaclPerm GRSTgaclPermFromChar(char *s)
  *                                            */
 
 GRSTgaclAcl *GRSTgaclAclNew(void)
-/*  
-    GRSTgaclAclNew - allocate a new acl and return its pointer (or NULL 
+/*
+    GRSTgaclAclNew - allocate a new acl and return its pointer (or NULL
                  on failure.)
 */
 {
@@ -784,7 +784,7 @@ int GRSTgaclAclFree(GRSTgaclAcl *acl)
 {
   if (acl == NULL) return 1;
 
-  GRSTgaclEntriesFree(acl->firstentry);  
+  GRSTgaclEntriesFree(acl->firstentry);
 
   return 1;
 }
@@ -792,9 +792,9 @@ int GRSTgaclAclFree(GRSTgaclAcl *acl)
 int GRSTgaclAclPrint(GRSTgaclAcl *acl, FILE *fp)
 {
   GRSTgaclEntry *entry;
-  
+
   fputs("<gacl version=\"0.9.0\">\n", fp);
-  
+
   for (entry = acl->firstentry; entry != NULL; entry = entry->next)
                                             GRSTgaclEntryPrint(entry, fp);
 
@@ -823,18 +823,18 @@ int GRSTgaclAclSave(GRSTgaclAcl *acl, char *filename)
 /*                                                    *
  * Functions for loading and parsing XML using libxml *
  *                                                    */
- 
+
 // need to check these for libxml memory leaks? - what needs to be freed?
 
 static GRSTgaclCred *GRSTgaclCredParse(xmlNodePtr cur)
 /*
-    GRSTgaclCredParse - parse a credential stored in the libxml structure cur, 
+    GRSTgaclCredParse - parse a credential stored in the libxml structure cur,
                     returning it as a pointer or NULL on error.
 */
 {
   xmlNodePtr    cur2;
   GRSTgaclCred *cred = NULL;
- 
+
   /* generic AURI creds first */
 
   if (strcmp((char *) cur->name, "cred") == 0)
@@ -881,7 +881,7 @@ static GRSTgaclCred *GRSTgaclCredParse(xmlNodePtr cur)
   for (cur2 = cur->xmlChildrenNode; cur2 != NULL; cur2=cur2->next)
      {
        if (!xmlIsBlankNode(cur2))
-        GRSTgaclCredAddValue(cred, (char *) cur2->name, 
+        GRSTgaclCredAddValue(cred, (char *) cur2->name,
                              (char *) xmlNodeGetContent(cur2));
      }
 
@@ -919,7 +919,7 @@ static GRSTgaclEntry *GRSTgaclEntryParse(xmlNodePtr cur)
                 if (!xmlIsBlankNode(cur2))
                   {
                     for (i=0; grst_perm_syms[i] != NULL; ++i)
-                     if (xmlStrcmp(cur2->name, 
+                     if (xmlStrcmp(cur2->name,
                              (const xmlChar *) grst_perm_syms[i]) == 0)
                        GRSTgaclEntryAllowPerm(entry, grst_perm_vals[i]);
                   }
@@ -930,15 +930,15 @@ static GRSTgaclEntry *GRSTgaclEntryParse(xmlNodePtr cur)
                 if (!xmlIsBlankNode(cur2))
                   {
                     for (i=0; grst_perm_syms[i] != NULL; ++i)
-                     if (xmlStrcmp(cur2->name, 
+                     if (xmlStrcmp(cur2->name,
                              (const xmlChar *) grst_perm_syms[i]) == 0)
                        GRSTgaclEntryDenyPerm(entry, grst_perm_vals[i]);
                   }
            }
-         else if ((cred = GRSTgaclCredParse(cur)) != NULL) 
+         else if ((cred = GRSTgaclCredParse(cur)) != NULL)
            {
              if (!GRSTgaclEntryAddCred(entry, cred))
-               { 
+               {
                  GRSTgaclCredFree(cred);
                  GRSTgaclEntryFree(entry);
                  return NULL;
@@ -964,33 +964,33 @@ GRSTgaclAcl *GRSTgaclAclLoadFile(char *filename)
 
   GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclAclLoadFile() starting");
 
-  if (filename == NULL) 
+  if (filename == NULL)
     {
       GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclAclLoadFile() cannot open a NULL filename");
       return NULL;
     }
 
   doc = xmlParseFile(filename);
-  if (doc == NULL) 
+  if (doc == NULL)
     {
       GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclAclLoadFile failed to open ACL file %s", filename);
       return NULL;
     }
 
   cur = xmlDocGetRootElement(doc);
-  if (cur == NULL) 
+  if (cur == NULL)
     {
       xmlFreeDoc(doc);
       GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclAclLoadFile failed to parse root of ACL file %s", filename);
       return NULL;
     }
 
-  if (!xmlStrcmp(cur->name, (const xmlChar *) "Policy")) 
-    { 
+  if (!xmlStrcmp(cur->name, (const xmlChar *) "Policy"))
+    {
       GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclAclLoadFile parsing XACML");
       acl=GRSTxacmlAclParse(doc, cur, acl);
     }
-  else if (!xmlStrcmp(cur->name, (const xmlChar *) "gacl")) 
+  else if (!xmlStrcmp(cur->name, (const xmlChar *) "gacl"))
     {
       GRSTerrorLog(GRST_LOG_DEBUG, "GRSTgaclAclLoadFile parsing GACL");
       acl=GRSTgaclAclParse(doc, cur, acl);
@@ -1047,7 +1047,7 @@ int GRSTgaclFileIsAcl(char *pathandfile)
 }
 
 char *GRSTgaclFileFindAclname(char *pathandfile)
-/* Return malloc()ed ACL filename that governs the given file or directory 
+/* Return malloc()ed ACL filename that governs the given file or directory
    (for directories, the ACL file is in the directory itself), or NULL if none
    can be found. */
 {
@@ -1057,7 +1057,7 @@ char *GRSTgaclFileFindAclname(char *pathandfile)
 
   len = strlen(pathandfile);
   if (len == 0) return NULL;
-  
+
   path = malloc(len + sizeof(GRST_ACL_FILE) + 2);
   strcpy(path, pathandfile);
 
@@ -1097,7 +1097,7 @@ char *GRSTgaclFileFindAclname(char *pathandfile)
          p = rindex(path, '/');
          if (p == NULL) break; /* must start without / and we there now ??? */
 
-         *p = '\0';     /* strip off another layer of / */                 
+         *p = '\0';     /* strip off another layer of / */
        }
 
   free(path);
@@ -1112,7 +1112,7 @@ GRSTgaclAcl *GRSTgaclAclLoadforFile(char *pathandfile)
   GRSTgaclAcl     *acl;
 
   path = GRSTgaclFileFindAclname(pathandfile);
-  
+
   if (path != NULL)
     {
       acl = GRSTgaclAclLoadFile(path);
@@ -1135,8 +1135,8 @@ GRSTgaclUser *GRSTgaclUserNew(GRSTgaclCred *cred)
 
   user = malloc(sizeof(GRSTgaclUser));
 
-  if (user != NULL)   
-    { 
+  if (user != NULL)
+    {
       user->firstcred = cred;
       user->dnlists   = NULL;
     }
@@ -1163,14 +1163,14 @@ int GRSTgaclUserAddCred(GRSTgaclUser *user, GRSTgaclCred *cred)
 
   if ((user == NULL) || (cred == NULL)) return 0;
 
-  if (user->firstcred == NULL) 
+  if (user->firstcred == NULL)
     {
       user->firstcred = cred;
       cred->next = NULL; /* so cannot be used to add whole lists */
       return 1;
     }
 
-  crediter = user->firstcred;  
+  crediter = user->firstcred;
 
   while (crediter->next != NULL) crediter = crediter->next;
 
@@ -1194,8 +1194,8 @@ int GRSTgaclUserHasCred(GRSTgaclUser *user, GRSTgaclCred *cred)
 
   if (strncmp(cred->auri, "dns:", 4) == 0)
     {
-      for (crediter=user->firstcred; 
-           crediter != NULL; 
+      for (crediter=user->firstcred;
+           crediter != NULL;
            crediter = crediter->next)
         if ((crediter->auri != NULL) &&
             (strncmp(crediter->auri, "dns:", 4) == 0))
@@ -1206,8 +1206,8 @@ int GRSTgaclUserHasCred(GRSTgaclUser *user, GRSTgaclCred *cred)
 
   if (strcmp(cred->auri, "gacl:auth-user") == 0)
     {
-      for (crediter=user->firstcred; 
-           crediter != NULL; 
+      for (crediter=user->firstcred;
+           crediter != NULL;
            crediter = crediter->next)
         if ((crediter->auri != NULL) &&
             (strncmp(crediter->auri, "dn:", 3) == 0)) return 1;
@@ -1217,8 +1217,8 @@ int GRSTgaclUserHasCred(GRSTgaclUser *user, GRSTgaclCred *cred)
 
   if (sscanf(cred->auri, "nist-loa:%d", &nist_loa) == 1)
     {
-      for (crediter=user->firstcred; 
-           crediter != NULL; 
+      for (crediter=user->firstcred;
+           crediter != NULL;
            crediter = crediter->next)
         if ((crediter->auri != NULL) &&
             (strncmp(crediter->auri, "dn:", 3) == 0) &&
@@ -1249,7 +1249,6 @@ int GRSTgaclUserHasCred(GRSTgaclUser *user, GRSTgaclCred *cred)
         crediter->ruri != NULL && cred->ruri != NULL &&
         strlen(crediter->ruri) > 0 && strlen(cred->ruri) > 0 ) {
       // Notice that we allow assigning read, admin permissions to dn:anyone.
-      // This is in contrast to any-user.
       // Notice also that "anyone" is anyone _who has authenticated_, i.e. who has
     	// crediter->ruri set.
       if (strcmp(cred->ruri, "anyone") == 0 ) {
@@ -1277,7 +1276,7 @@ GRSTgaclCred *GRSTgaclUserFindCredtype(GRSTgaclUser *user, char *type)
 
   if (user == NULL) return NULL;
 
-  cred = user->firstcred;  
+  cred = user->firstcred;
 
   while (cred != NULL)
        {
@@ -1291,7 +1290,7 @@ GRSTgaclCred *GRSTgaclUserFindCredtype(GRSTgaclUser *user, char *type)
              (strncmp(cred->auri, "dns:", 4) == 0)) return cred;
 
          if ((strcmp(type, "dn-list") == 0) &&
-             ((strncmp(cred->auri, "http:",  5) == 0) || 
+             ((strncmp(cred->auri, "http:",  5) == 0) ||
               (strncmp(cred->auri, "https:", 6) == 0))) return cred;
 
          cred = cred->next;
@@ -1312,7 +1311,7 @@ int GRSTgaclUserSetDNlists(GRSTgaclUser *user, char *dnlists)
 
 static void recurse4dnlists(GRSTgaclUser *user, char *dir,
                             int recurse_level, GRSTgaclCred *dn_cred)
-/* try to find file[] in dir[]. try subdirs if not found. 
+/* try to find file[] in dir[]. try subdirs if not found.
    return full path to first found version or NULL on failure */
 {
   int            fd, linestart, i;
@@ -1348,32 +1347,32 @@ static void recurse4dnlists(GRSTgaclUser *user, char *dir,
          else if (S_ISDIR(statbuf.st_mode))
            recurse4dnlists(user, fullfilename, recurse_level + 1, dn_cred);
          else if ((S_ISREG(statbuf.st_mode) || S_ISLNK(statbuf.st_mode)) &&
-                  ((mapped = mmap(NULL, statbuf.st_size, 
+                  ((mapped = mmap(NULL, statbuf.st_size,
                                PROT_READ, MAP_PRIVATE, fd, 0)) != MAP_FAILED))
-           {  
+           {
              linestart = 0;
 
              while (linestart + dn_len <= statbuf.st_size)
                   {
-                    GRSTerrorLog(GRST_LOG_DEBUG, "recurse4dnlists at %ld in %s", 
+                    GRSTerrorLog(GRST_LOG_DEBUG, "recurse4dnlists at %ld in %s",
                           linestart, fullfilename);
 
-                    for (i=0; 
+                    for (i=0;
                          (linestart + i < statbuf.st_size) && (i < dn_len);
                          ++i)
                        if (mapped[linestart + i] != dn_cred->auri[3+i]) break;
 
-                    GRSTerrorLog(GRST_LOG_DEBUG, "recurse4dnlists at %d %d %d %d", 
+                    GRSTerrorLog(GRST_LOG_DEBUG, "recurse4dnlists at %d %d %d %d",
                           linestart, i, dn_len, statbuf.st_size);
 
-                    if ((i == dn_len) && 
+                    if ((i == dn_len) &&
                         ((linestart+i == statbuf.st_size) ||
                          (mapped[linestart+i] == '\n') ||
                          (mapped[linestart+i] == '\r')))  /* matched */
                       {
                         s = GRSThttpUrlDecode(file_ent->d_name);
                         cred = GRSTgaclCredCreate(s, NULL);
-                        GRSTerrorLog(GRST_LOG_DEBUG, 
+                        GRSTerrorLog(GRST_LOG_DEBUG,
                                      "recurse4dnlists adds %s", s);
                         free(s);
 
@@ -1389,11 +1388,11 @@ static void recurse4dnlists(GRSTgaclUser *user, char *dir,
                     linestart += i;
 
                     while ((linestart < statbuf.st_size) &&
-                           (mapped[linestart] != '\n') && 
+                           (mapped[linestart] != '\n') &&
                            (mapped[linestart] != '\r')) ++linestart;
 
                     while ((linestart < statbuf.st_size) &&
-                           ((mapped[linestart] == '\n') || 
+                           ((mapped[linestart] == '\n') ||
                             (mapped[linestart] == '\r'))) ++linestart;
                   }
 
@@ -1421,22 +1420,22 @@ int GRSTgaclUserLoadDNlists(GRSTgaclUser *user, char *dnlists)
   if (dnlists == NULL) dnlists = getenv("GRST_DN_LISTS");
 
   if (dnlists == NULL) dnlists = GRST_DN_LISTS;
-  
+
   if (*dnlists == '\0') return 1; /* Didn't ask for anything: that's ok */
-  
+
   /* find this user's (first) DN */
-  
+
   if (user == NULL) return 1; /* No user! */
 
   for (dn_cred = user->firstcred; dn_cred != NULL; dn_cred = dn_cred->next)
-     { 
+     {
        if (strncmp(dn_cred->auri, "dn:", 3) == 0) break;
      }
 
   if (dn_cred == NULL) return 1; /* User has no DN! */
 
   /* look through DN List files */
-  
+
   dn_lists_dirs = strdup(dnlists); /* we need to keep this for free() later! */
   dn_list_ptr   = dn_lists_dirs;   /* copy, for naughty function strsep()    */
 
@@ -1455,7 +1454,7 @@ int GRSTgaclUserLoadDNlists(GRSTgaclUser *user, char *dnlists)
 
 #if 0
 static char *recurse4file(char *dir, char *file, int recurse_level)
-/* try to find file[] in dir[]. try subdirs if not found. 
+/* try to find file[] in dir[]. try subdirs if not found.
    return full path to first found version or NULL on failure */
 {
   char          *fullfilename, *fulldirname;
@@ -1465,12 +1464,12 @@ static char *recurse4file(char *dir, char *file, int recurse_level)
 
   /* try to find in current directory */
 
-  asprintf(&fullfilename, "%s/%s", dir, file);  
+  asprintf(&fullfilename, "%s/%s", dir, file);
   if (stat(fullfilename, &statbuf) == 0) return fullfilename;
   free(fullfilename);
 
   /* maybe search in subdirectories */
-  
+
   if (recurse_level >= GRST_RECURS_LIMIT) return NULL;
 
   dirDIR = opendir(dir);
@@ -1485,7 +1484,7 @@ static char *recurse4file(char *dir, char *file, int recurse_level)
 
          if ((stat(fulldirname, &statbuf) == 0) &&
              S_ISDIR(statbuf.st_mode) &&
-             ((fullfilename = recurse4file(fulldirname, file, 
+             ((fullfilename = recurse4file(fulldirname, file,
                                              recurse_level + 1)) != NULL))
            {
              closedir(dirDIR);
@@ -1495,7 +1494,7 @@ static char *recurse4file(char *dir, char *file, int recurse_level)
          free(fulldirname);
        }
 
-  closedir(dirDIR);  
+  closedir(dirDIR);
 
   return NULL;
 }
@@ -1562,22 +1561,23 @@ GRSTgaclPerm GRSTgaclAclTestUser(GRSTgaclAcl *acl, GRSTgaclUser *user)
 
        allowed = entry->allowed;
 
-       if (onlyanyuser)
+       /* Well, now we do - FO */
+       /*if (onlyanyuser)
             allowed = entry->allowed & ~GRST_PERM_WRITE & ~GRST_PERM_ADMIN;
-       else allowed = entry->allowed;
+       else allowed = entry->allowed;*/
 
        allowperms = allowperms | allowed;
        denyperms  = denyperms  | entry->denied;
      }
 
-  return (allowperms & (~ denyperms)); 
+  return (allowperms & (~ denyperms));
   /* for each perm type, any deny we saw kills any allow */
 }
 
 GRSTgaclPerm GRSTgaclAclTestexclUser(GRSTgaclAcl *acl, GRSTgaclUser *user)
 /*
-    GRSTgaclAclTestexclUser - 
-                      return bit fields depending on ALLOW perms OTHER users 
+    GRSTgaclAclTestexclUser -
+                      return bit fields depending on ALLOW perms OTHER users
                       have for given acl. All zero if they have no access.
                       (used for testing if a user has exclusive access)
 */
@@ -1600,7 +1600,7 @@ GRSTgaclPerm GRSTgaclAclTestexclUser(GRSTgaclAcl *acl, GRSTgaclUser *user)
                 they must also be recognised here */
               {
                 flag = 1;
-                break; 
+                break;
               }
 
             if (!GRSTgaclUserHasCred(user, cred))
@@ -1618,7 +1618,7 @@ GRSTgaclPerm GRSTgaclAclTestexclUser(GRSTgaclAcl *acl, GRSTgaclUser *user)
   return perm;
 }
 
-/* 
+/*
     Wrapper functions for gridsite-gacl.h support of legacy API
 */
 
