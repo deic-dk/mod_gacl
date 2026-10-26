@@ -164,6 +164,7 @@
 #include <fcntl.h>
 #include <libgen.h>
 #include <stdlib.h>
+#include "apr_thread_proc.h"
 
 /* Forward declaration */
 module AP_MODULE_DECLARE_DATA gacl_module;
@@ -510,6 +511,50 @@ static int dump_request(request_rec *r)
 	  return OK;
 }
 
+/**
+ * The current working directory, copied into pool p. glibc's getcwd(NULL, 0)
+ * mallocs its result; it used to be called several times per request and never
+ * freed, so every request leaked a few hundred bytes in the Apache child.
+ */
+static char* pool_getcwd(apr_pool_t* p){
+	char* buf = getcwd(NULL, 0);
+	char* ret;
+	if (buf == NULL) {
+		return NULL;
+	}
+	ret = apr_pstrdup(p, buf);
+	free(buf);
+	return ret;
+}
+
+/**
+ * Run the VO sync script on a directory and return its exit code (-1 if it
+ * could not be run). The directory is passed as the script's single argument
+ * through APR's process API - no shell is involved, so nothing in the path is
+ * ever interpreted as a command.
+ */
+static int run_vo_script(request_rec* r, const char* script, const char* dir){
+	apr_procattr_t* attr;
+	apr_proc_t proc;
+	apr_exit_why_e why;
+	int code = -1;
+	const char* argv[3];
+	argv[0] = script;
+	argv[1] = dir;
+	argv[2] = NULL;
+	if (apr_procattr_create(&attr, r->pool) != APR_SUCCESS ||
+			apr_procattr_cmdtype_set(attr, APR_PROGRAM_ENV) != APR_SUCCESS ||
+			apr_procattr_io_set(attr, APR_NO_PIPE, APR_NO_PIPE, APR_NO_PIPE) != APR_SUCCESS ||
+			apr_proc_create(&proc, script, argv, NULL, attr, r->pool) != APR_SUCCESS) {
+		ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "could not start %s", script);
+		return -1;
+	}
+	if (apr_proc_wait(&proc, &code, &why, APR_WAIT) != APR_CHILD_DONE || why != APR_PROC_EXIT) {
+		return -1;
+	}
+	return code;
+}
+
 static int get_perm(char* perm){
 	int ret = DEFAULT_PERM;
 	if(apr_strnatcasecmp(perm, "none") == 0){
@@ -721,7 +766,7 @@ static void find_gacl_file(request_rec* r, char* pwd){
 			break;
 		}
 
-		pwd = (char*) getcwd(NULL, 0);
+		pwd = pool_getcwd(r->pool);
 
 		++rec;
 
@@ -781,7 +826,7 @@ static config_rec* get_module_conf(){
 {
 	char* gacl_file_path;
 	gacl_file_path = gacl_file;
-	char* pwd = (char*) getcwd(NULL, 0);
+	char* pwd = pool_getcwd(r->pool);
 	if(gacl_file[0] != '/'){
 		gacl_file_path = apr_pstrcat(r->pool, pwd, "/", gacl_file, NULL);
 	}
@@ -822,7 +867,7 @@ GRSTgaclAcl* parse_gacl_file(request_rec *r, char* gacl_file)
  // We do this in case another process is just writing or modifying the GACL file.
  for (i = 0; i < GACL_PARSE_ATTEMPTS; i++) {
  	gacl_file_ok = access(gacl_file, R_OK);
- 	char* pwd = (char*) getcwd(NULL, 0);
+ 	char* pwd = pool_getcwd(r->pool);
  	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "loading ACL from: '%s', '%s'", gacl_file, pwd);
 		if(gacl_file_ok == 0){
 			acl = GRSTgaclAclLoadFile(gacl_file);
@@ -832,10 +877,10 @@ GRSTgaclAcl* parse_gacl_file(request_rec *r, char* gacl_file)
 			}
 		}
 		if(i == GACL_PARSE_ATTEMPTS - 1){
-			ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "could not access '%s/%s' - giving up", getcwd(NULL, 0), gacl_file);
+			ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "could not access '%s/%s' - giving up", pool_getcwd(r->pool), gacl_file);
 			break;
 		}
-		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "waiting for '%s/%s' to be accessible - %i ...", getcwd(NULL, 0), gacl_file, i);
+		ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "waiting for '%s/%s' to be accessible - %i ...", pool_getcwd(r->pool), gacl_file, i);
 		sleep(GACL_PARSE_INTERVAL);
 	}
 	return acl;
@@ -940,7 +985,7 @@ void acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int 
 
 	struct stat attrib;
 	apr_status_t rv;
-	char* pwd = (char*) getcwd(NULL, 0);
+	char* pwd = pool_getcwd(r->pool);
 
 	GRSTgaclAcl* acl;
 	time_t last_modified_time;
@@ -1174,7 +1219,7 @@ int check_auth(request_rec *r, int nocache)
 	}
 	pwd = get_path(r, req_fil);
 	
-	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current directory: %s", getcwd(NULL, 0));
+	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "current directory: %s", pool_getcwd(r->pool));
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "chdir() to '%s'", pwd);
 	if (chdir(pwd) < 0){
 		ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "chdir() to '%s' failed", pwd);
@@ -1183,7 +1228,7 @@ int check_auth(request_rec *r, int nocache)
 	GRSTgaclInit();
 
 	/* Recurse upwards until .gacl file is found. */
-	pwd = (char*) getcwd(NULL, 0);
+	pwd = pool_getcwd(r->pool);
 	find_gacl_file(r, pwd);
 
 	/* Load the ACLs. */
@@ -1212,6 +1257,8 @@ int check_auth(request_rec *r, int nocache)
 		else{
 			perm2 = GRSTgaclAclTestUser(acl2, user);
 		}
+		/* The user owns usercred; both were malloc'ed and leaked on every request. */
+		GRSTgaclUserFree(user);
 
 	}
 
@@ -1342,7 +1389,7 @@ int gacl_check(request_rec *r)
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "file to check '%s'.", check_file_path);
 	dir = get_path(r, check_file_path);
 	find_gacl_file(r, dir);
-	pwd = (char*) getcwd(NULL, 0);
+	pwd = pool_getcwd(r->pool);
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "Dir: %s.", dir);
 	gacl_vo_file_path = apr_pstrcat(r->pool, pwd, "/"/*dir*/, GACL_VO_FILE, NULL);
 	if (conf->path_ == 0) {
@@ -1351,10 +1398,11 @@ int gacl_check(request_rec *r)
 	}
 	else{
 		if( check_timeout(r, gacl_vo_file_path) >= 0 ){
-			char * command = apr_pstrcat(r->pool, conf->path_, " ", check_file_path, NULL);
-			/* Run the script as a system command */
-			ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "executing %s", command);
-			run_res = system(command);
+			/* Sync the VOs of the directory holding the .gacl file that applies -
+			 * the directory find_gacl_file() resolved and chdir'ed into, not a path
+			 * taken from the request. */
+			ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "executing %s %s", conf->path_, pwd);
+			run_res = (pwd == NULL) ? -1 : run_vo_script(r, conf->path_, pwd);
 			if (run_res != OK) {
 				ap_log_rerror(MY_MARK, APLOG_ERR, 0, r, "error on script execution, %i", run_res);
 				return DECLINED; /* Script claims an error */
