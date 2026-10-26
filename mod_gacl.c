@@ -1088,6 +1088,23 @@ void acl_cache_update(request_rec *r, char* gacl_file, GRSTgaclAcl* up_acl, int 
 /**
  * Load ACL.
  */
+/**
+ * Whether cache entry 'index' holds the current version of 'gacl_file' (same
+ * modification time). Used so that a forced reload of an unchanged file reuses
+ * the cached ACL: a freshly parsed copy of an unchanged file is not stored in
+ * the cache, so it was never freed.
+ */
+static int acl_cache_is_current(request_rec *r, char* gacl_file, int index)
+{
+	struct stat attrib;
+	config_rec* module_conf = get_module_conf();
+	if(index < 0 || index >= module_conf->acl_cache_->date_array_->nelts ||
+			stat(gacl_file, &attrib) < 0){
+		return 0;
+	}
+	return *((time_t**)module_conf->acl_cache_->date_array_->elts)[index] == attrib.st_mtime;
+}
+
 GRSTgaclAcl* load_acl(request_rec *r, char* gacl_file, int nocache)
 {
 	GRSTgaclAcl* acl = NULL;
@@ -1096,7 +1113,8 @@ GRSTgaclAcl* load_acl(request_rec *r, char* gacl_file, int nocache)
 	if (gacl_file_ok == 0) {
 		// Check cache
 		gacl_cache_index = acl_cache_check(r, gacl_file);
-		if(gacl_cache_index >= 0 && nocache == 0){
+		if(gacl_cache_index >= 0 &&
+				(nocache == 0 || acl_cache_is_current(r, gacl_file, gacl_cache_index))){
 			// load from cache
 			ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "using cached ACL with index '%i'", gacl_cache_index);
 			acl = acl_cache_get(r, gacl_cache_index);
