@@ -152,6 +152,7 @@
 #include "http_request.h"
 #include "http_log.h"
 #include "apr_strings.h"
+#include "apr_uri.h"
 #include "apr_buckets.h"
 #include "util_filter.h"
 #include "gacl_interface/gridsite.h"
@@ -242,6 +243,7 @@ typedef struct {
   char* gacldir_;
   const char* dnheader_;
   char* onlyfrom_;
+  apr_array_header_t* readonly_; /* ap_regex_t* - see GACLReadOnly */
   int timeout_;
   int count_;
   apr_pool_t* pool_;
@@ -328,6 +330,7 @@ dir_config(apr_pool_t* p, char* d)
 	conf->gacldir_ = 0;			/* null pointer */
 	conf->dnheader_ = 0;			/* null pointer */
 	conf->onlyfrom_ = 0;			/* null pointer */
+	conf->readonly_ = 0;			/* null pointer */
 	conf->timeout_ = -1;
 
 	return conf;
@@ -400,6 +403,28 @@ config_onlyfrom(cmd_parms* cmd, void* mconfig, const char* arg)
 	return 0;
 }
 
+/*
+ * Paths (regular expressions matched against the request URI) that cannot be
+ * changed over HTTP, whatever the ACLs say. A .gacl that lets users create
+ * subdirectories (e.g. job directories) also lets them delete or move the
+ * directory itself, and rewrite the .gacl files that govern it - GACL cannot
+ * express "may create in, but not remove". For such structural paths only
+ * GET, HEAD, OPTIONS and PROPFIND pass; for MOVE and COPY the Destination is
+ * checked too.
+ */
+const char*
+config_readonly(cmd_parms* cmd, void* mconfig, const char* arg)
+{
+	config_rec* conf = (config_rec*)mconfig;
+	ap_regex_t* re = ap_pregcomp(cmd->pool, arg, AP_REG_EXTENDED | AP_REG_NOSUB);
+	if (re == NULL)
+		return apr_pstrcat(cmd->pool, "GACLReadOnly: cannot compile regular expression ", arg, NULL);
+	if (conf->readonly_ == NULL)
+		conf->readonly_ = apr_array_make(cmd->pool, 4, sizeof(ap_regex_t*));
+	*(ap_regex_t**)apr_array_push(conf->readonly_) = re;
+	return 0;
+}
+
 const char*
 config_timeout(cmd_parms* cmd, void* mconfig, const char* arg)
 {
@@ -439,6 +464,9 @@ static const command_rec command_table[] = {
 	AP_INIT_TAKE1(
     "OnlyFrom", config_onlyfrom, NULL, OR_AUTHCFG,
     "IP address of host from where DNHeader authentication will be accepted."),
+	AP_INIT_ITERATE(
+    "GACLReadOnly", config_readonly, NULL, OR_AUTHCFG,
+    "Regular expressions of URI paths that cannot be changed over HTTP, whatever the ACLs say."),
 	AP_INIT_TAKE1(
     "VOTimeoutSeconds", config_timeout, NULL, OR_AUTHCFG,
     "Cache timeout for VO lists (dn-lists)."),
@@ -1156,10 +1184,17 @@ int check_auth(request_rec *r, int nocache)
 	if (r->method_number == M_PROPFIND)
 		perm0 = GRST_PERM_LIST;
 
-	if(apr_strnatcmp(r->filename, GACL_FILE) == 0 ||
-		 apr_strnatcmp(r->filename, GACL_VO_FILE) == 0){
+	/* Changing an ACL file needs admin. (r->filename is a full path, so
+	 * compare its last component - comparing the whole path never matched,
+	 * and writing a .gacl only needed write.) */
+	{
+		const char* base = r->filename == NULL ? NULL : strrchr(r->filename, '/');
+		base = (base == NULL) ? r->filename : base + 1;
+		if(perm0 == GRST_PERM_WRITE && base != NULL &&
+				(apr_strnatcmp(base, GACL_FILE) == 0 || apr_strnatcmp(base, GACL_VO_FILE) == 0)){
 			perm0 = GRST_PERM_ADMIN;
 		}
+	}
 
 	/* Find the path of the file/directory to check. */
 	if (GACL_ROOT == NULL) {
@@ -1313,6 +1348,54 @@ int check_auth(request_rec *r, int nocache)
  * Set constants from config file, check if module enabled and sync with dn-list-url.
  */
 
+static int is_readonly_path(config_rec* conf, const char* path)
+{
+	int i;
+	if (conf->readonly_ == NULL || path == NULL)
+		return 0;
+	for (i = 0; i < conf->readonly_->nelts; ++i) {
+		if (ap_regexec(((ap_regex_t**)conf->readonly_->elts)[i], path, 0, NULL, 0) == 0)
+			return 1;
+	}
+	return 0;
+}
+
+/* Refuse changes to a GACLReadOnly path - the request URI, and for MOVE/COPY
+ * also the Destination. Returns OK or HTTP_FORBIDDEN. */
+static int check_readonly(request_rec* r, config_rec* conf)
+{
+	const char* dest;
+	apr_uri_t uri;
+	char* dest_path;
+	if (conf->readonly_ == NULL || r->method_number == M_GET ||
+			r->method_number == M_OPTIONS || r->method_number == M_PROPFIND)
+		return OK;
+	if (is_readonly_path(conf, r->uri)) {
+		ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "refusing %s of read-only path %s", r->method, r->uri);
+		return HTTP_FORBIDDEN;
+	}
+	if (r->method_number == M_MOVE || r->method_number == M_COPY) {
+		dest = apr_table_get(r->headers_in, "Destination");
+		if (dest == NULL || apr_uri_parse(r->pool, dest, &uri) != APR_SUCCESS || uri.path == NULL) {
+			ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "refusing %s without a usable Destination", r->method);
+			return HTTP_FORBIDDEN;
+		}
+		/* Same normalization as the request URI gets: decode, resolve dot
+		 * segments, merge slashes. */
+		dest_path = apr_pstrdup(r->pool, uri.path);
+		if (ap_unescape_url(dest_path) != OK) {
+			return HTTP_FORBIDDEN;
+		}
+		ap_getparents(dest_path);
+		ap_no2slash(dest_path);
+		if (is_readonly_path(conf, dest_path)) {
+			ap_log_rerror(MY_MARK, APLOG_WARNING, 0, r, "refusing %s to read-only path %s", r->method, dest_path);
+			return HTTP_FORBIDDEN;
+		}
+	}
+	return OK;
+}
+
 int gacl_check(request_rec *r)
 {
 	ap_log_rerror(MY_MARK, APLOG_INFO, 0, r, "setting up gacl");
@@ -1356,6 +1439,11 @@ int gacl_check(request_rec *r)
 
 	/* Get directory config. */
 	conf = (config_rec*)ap_get_module_config(r->per_dir_config, &gacl_module);
+
+	/* Structural paths cannot be changed, whatever the ACLs say. */
+	if (check_readonly(r, conf) != OK) {
+		return HTTP_FORBIDDEN;
+	}
 
 	/* Check if not configured to use this module; thanks to mrueegg AT sf. */
 	/*if (conf->type_ == type_unset)
